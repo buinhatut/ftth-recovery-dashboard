@@ -371,57 +371,73 @@ export default function DashboardPage() {
                 />
               </div>
 
-              <section className="bg-white rounded-2xl shadow p-6 mb-6">
-                <div className="flex justify-between items-center mb-5">
-                  <div>
-                    <h2 className="font-black text-xl">
-                      Xu hướng tạm ngưng theo ngày trong tháng
-                    </h2>
-                    <p className="text-sm text-slate-500">
-                      Cột: tạm ngưng | Line: tiếp xúc, khôi phục, đóng việc
-                    </p>
+              <div className="grid grid-cols-1 xl:grid-cols-4 gap-6 mb-6">
+                <section className="xl:col-span-3 bg-white rounded-2xl shadow p-6">
+                  <div className="flex justify-between items-center mb-5">
+                    <div>
+                      <h2 className="font-black text-xl">
+                        Xu hướng tạm ngưng theo ngày trong tháng
+                      </h2>
+                      <p className="text-sm text-slate-500">
+                        Cột: tạm ngưng | Line: tiếp xúc, khôi phục, đóng việc
+                      </p>
+                    </div>
                   </div>
-                </div>
 
-                <div className="h-[340px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={trendData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="date" />
-                      <YAxis allowDecimals={false} />
-                      <Tooltip />
-                      <Legend />
-                      <Bar
-                        dataKey="suspend"
-                        name="Tạm ngưng"
-                        fill={COLORS.blue}
-                        radius={[6, 6, 0, 0]}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="contact"
-                        name="Tiếp xúc"
-                        stroke={COLORS.green}
-                        strokeWidth={3}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="recovery"
-                        name="Khôi phục"
-                        stroke={COLORS.orange}
-                        strokeWidth={3}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="close"
-                        name="Đóng việc"
-                        stroke={COLORS.purple}
-                        strokeWidth={3}
-                      />
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                </div>
-              </section>
+                  <div className="h-[340px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ComposedChart data={trendData}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="date" />
+                        <YAxis allowDecimals={false} />
+                        <Tooltip />
+                        <Legend />
+                        <Bar
+                          dataKey="suspend"
+                          name="Tạm ngưng"
+                          fill={COLORS.blue}
+                          radius={[6, 6, 0, 0]}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="contact"
+                          name="Tiếp xúc"
+                          stroke={COLORS.green}
+                          strokeWidth={3}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="recovery"
+                          name="Khôi phục"
+                          stroke={COLORS.orange}
+                          strokeWidth={3}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="close"
+                          name="Đóng việc"
+                          stroke={COLORS.purple}
+                          strokeWidth={3}
+                        />
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  </div>
+                </section>
+
+                <section className="bg-white rounded-2xl shadow p-6">
+                  <h2 className="font-black text-xl mb-5">Tổng quan tháng</h2>
+
+                  <Summary label="Tạm ngưng tháng" value={monthStats.total} />
+                  <Summary label="Tạm ngưng ngày N" value={todayStats.total} />
+                  <Summary label="Tạm ngưng N-1" value={yesterdayStats.total} />
+                  <Summary label="Đã tiếp xúc" value={monthStats.contacted} />
+                  <Summary label="Đã khôi phục" value={monthStats.recovered} />
+                  <Summary label="Tỷ lệ khôi phục" value={`${monthStats.recoveryRate}%`} />
+                  <Summary label="Chưa tiếp xúc" value={monthStats.notContacted} />
+                  <Summary label="Tồn > 7 ngày" value={monthStats.over7} />
+                  <Summary label="Tồn > 15 ngày" value={monthStats.over15} />
+                </section>
+              </div>
 
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
                 <ChartCard title="Top VTKV tạm ngưng trong tháng">
@@ -495,60 +511,42 @@ export default function DashboardPage() {
                 </ChartCard>
               </div>
 
-              <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-                <section className="xl:col-span-2 bg-white rounded-2xl shadow p-6">
-                  <div className="flex justify-between items-center mb-5">
-                    <h2 className="font-black text-xl">Thống kê theo CNKD</h2>
-
-                    <div className="flex items-center gap-3 text-sm">
-                      <button
-                        onClick={() => setCnkdPage((p) => Math.max(1, p - 1))}
-                        disabled={cnkdPage <= 1}
-                        className="px-4 py-2 rounded-lg bg-slate-100 font-bold disabled:opacity-40"
-                      >
-                        Previous
-                      </button>
-
-                      <span>
-                        Trang <b>{cnkdPage}</b> / <b>{cnkdTotalPages}</b>
-                      </span>
-
-                      <button
-                        onClick={() =>
-                          setCnkdPage((p) => Math.min(cnkdTotalPages, p + 1))
-                        }
-                        disabled={cnkdPage >= cnkdTotalPages}
-                        className="px-4 py-2 rounded-lg bg-slate-100 font-bold disabled:opacity-40"
-                      >
-                        Next
-                      </button>
-                    </div>
-                  </div>
-
-                  <StatsTable data={cnkdPageData} firstCol="CNKD" />
-                </section>
-
-                <section className="bg-white rounded-2xl shadow p-6">
-                  <h2 className="font-black text-xl mb-5">Tổng quan tháng</h2>
-
-                  <Summary label="Tạm ngưng tháng" value={monthStats.total} />
-                  <Summary label="Tạm ngưng ngày N" value={todayStats.total} />
-                  <Summary label="Tạm ngưng N-1" value={yesterdayStats.total} />
-                  <Summary label="Đã tiếp xúc" value={monthStats.contacted} />
-                  <Summary label="Đã khôi phục" value={monthStats.recovered} />
-                  <Summary label="Tỷ lệ khôi phục" value={`${monthStats.recoveryRate}%`} />
-                  <Summary label="Chưa tiếp xúc" value={monthStats.notContacted} />
-                  <Summary label="Tồn > 7 ngày" value={monthStats.over7} />
-                  <Summary label="Tồn > 15 ngày" value={monthStats.over15} />
-                </section>
-              </div>
-
               {role !== "CNKD" && (
                 <section className="bg-white rounded-2xl shadow p-6 mt-6">
                   <h2 className="font-black text-xl mb-5">Thống kê theo VTKV</h2>
                   <StatsTable data={byVTKV} firstCol="VTKV" />
                 </section>
               )}
+
+              <section className="bg-white rounded-2xl shadow p-6 mt-6">
+                <div className="flex justify-between items-center mb-5">
+                  <h2 className="font-black text-xl">Thống kê theo CNKD</h2>
+
+                  <div className="flex items-center gap-3 text-sm">
+                    <button
+                      onClick={() => setCnkdPage((p) => Math.max(1, p - 1))}
+                      disabled={cnkdPage <= 1}
+                      className="px-4 py-2 rounded-lg bg-slate-100 font-bold disabled:opacity-40"
+                    >
+                      Previous
+                    </button>
+
+                    <span>
+                      Trang <b>{cnkdPage}</b> / <b>{cnkdTotalPages}</b>
+                    </span>
+
+                    <button
+                      onClick={() => setCnkdPage((p) => Math.min(cnkdTotalPages, p + 1))}
+                      disabled={cnkdPage >= cnkdTotalPages}
+                      className="px-4 py-2 rounded-lg bg-slate-100 font-bold disabled:opacity-40"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+
+                <StatsTable data={cnkdPageData} firstCol="CNKD" />
+              </section>
             </>
           )}
         </div>
