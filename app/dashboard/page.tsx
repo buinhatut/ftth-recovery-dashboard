@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import html2canvas from "html2canvas";
+import { toBlob, toPng } from "html-to-image";
 import {
   Bar,
   BarChart,
@@ -234,72 +234,63 @@ export default function DashboardPage() {
   }
 
   async function exportDashboardPNG(mode: "download" | "copy") {
-    if (!dashboardRef.current) return;
+    const element = dashboardRef.current;
+    if (!element) return;
 
     setExporting(true);
 
     try {
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 500));
 
-    const canvas = await html2canvas(dashboardRef.current, {
-  scale: 2,
-  backgroundColor: "#ffffff",
-  useCORS: true,
-  logging: false,
-  ignoreElements: (el) => {
-    return el.classList?.contains("no-export");
-  },
-  onclone: (doc) => {
-    const root = doc.querySelector("[data-export-root]") as HTMLElement | null;
+      const filename = `ftth-recovery-${activeMonth}-${
+        selectedVTKV === "ALL" ? "ALL" : selectedVTKV
+      }.png`;
 
-    if (root) {
-      root.style.backgroundColor = "#ffffff";
-      root.style.color = "#0f172a";
-    }
+      const filter = (node: HTMLElement) => {
+        return !node.classList?.contains("no-export");
+      };
 
-    doc.querySelectorAll("*").forEach((el: any) => {
-      const style = window.getComputedStyle(el);
-
-      if (style.backgroundColor.includes("lab") || style.backgroundColor.includes("oklch")) {
-        el.style.backgroundColor = "#ffffff";
-      }
-
-      if (style.color.includes("lab") || style.color.includes("oklch")) {
-        el.style.color = "#0f172a";
-      }
-
-      if (style.borderColor.includes("lab") || style.borderColor.includes("oklch")) {
-        el.style.borderColor = "#e5e7eb";
-      }
-    });
-  },
-});
-
-      const filename = `ftth-recovery-${activeMonth}-${selectedVTKV === "ALL" ? "ALL" : selectedVTKV}.png`;
+      const exportOptions = {
+        cacheBust: true,
+        pixelRatio: 2,
+        backgroundColor: "#ffffff",
+        filter,
+        style: {
+          background: "#ffffff",
+          color: "#0f172a",
+        },
+      };
 
       if (mode === "copy" && navigator.clipboard && (window as any).ClipboardItem) {
-        const blob = await new Promise<Blob | null>((resolve) =>
-          canvas.toBlob((b) => resolve(b), "image/png")
-        );
+        const blob = await toBlob(element, exportOptions);
 
-        if (blob) {
-          await navigator.clipboard.write([
-            new (window as any).ClipboardItem({
-              "image/png": blob,
-            }),
-          ]);
-
-          alert("Đã copy ảnh Dashboard. Anh có thể Paste vào WhatsApp.");
-          return;
+        if (!blob) {
+          throw new Error("Không tạo được PNG blob");
         }
+
+        await navigator.clipboard.write([
+          new (window as any).ClipboardItem({
+            "image/png": blob,
+          }),
+        ]);
+
+        alert("Đã copy ảnh Dashboard. Anh có thể Paste vào WhatsApp.");
+        return;
       }
+
+      const dataUrl = await toPng(element, exportOptions);
 
       const link = document.createElement("a");
       link.download = filename;
-      link.href = canvas.toDataURL("image/png");
+      link.href = dataUrl;
       link.click();
     } catch (err: any) {
-      alert("Không export được PNG: " + err.message);
+      console.error(err);
+
+      alert(
+        "Không export được PNG:\n\n" +
+          (err?.message || JSON.stringify(err))
+      );
     } finally {
       setExporting(false);
     }
