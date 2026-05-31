@@ -2,21 +2,18 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import AppMenu from "../components/AppMenu";
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  LineChart,
-  Line,
   CartesianGrid,
-  PieChart,
-  Pie,
   Cell,
   Legend,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
 } from "recharts";
 
 type Row = {
@@ -26,8 +23,6 @@ type Row = {
   phone: string;
   suspend_date?: string;
   suspend_month?: string;
-  suspend_year?: string;
-  suspend_day?: string;
   days_suspend?: number | string;
   latest_contact_status?: string;
   latest_reason_l1_name?: string;
@@ -36,13 +31,21 @@ type Row = {
   latest_workflow_status?: string;
 };
 
+const C = {
+  blue: "#2563eb",
+  green: "#16a34a",
+  orange: "#f97316",
+  purple: "#7c3aed",
+  gray: "#e5e7eb",
+};
+
 export default function DashboardPage() {
   const router = useRouter();
 
   const [user, setUser] = useState<any>(null);
   const [rows, setRows] = useState<Row[]>([]);
-  const [selectedVTKV, setSelectedVTKV] = useState("ALL");
   const [selectedMonth, setSelectedMonth] = useState("ALL");
+  const [selectedVTKV, setSelectedVTKV] = useState("ALL");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -82,36 +85,27 @@ export default function DashboardPage() {
 
   const role = String(user?.role || "").toUpperCase();
 
-  const vtkvList = useMemo(() => {
-    const set = new Set<string>();
-    rows.forEach((r) => {
-      if (r.vtkv) set.add(r.vtkv);
-    });
-    return Array.from(set).sort();
+  const monthList = useMemo(() => {
+    const s = new Set<string>();
+    rows.forEach((r) => r.suspend_month && s.add(r.suspend_month));
+    return Array.from(s).sort().reverse();
   }, [rows]);
 
-  const monthList = useMemo(() => {
-    const set = new Set<string>();
-    rows.forEach((r) => {
-      if (r.suspend_month) set.add(r.suspend_month);
-    });
-    return Array.from(set).sort().reverse();
+  const vtkvList = useMemo(() => {
+    const s = new Set<string>();
+    rows.forEach((r) => r.vtkv && s.add(r.vtkv));
+    return Array.from(s).sort();
   }, [rows]);
 
   const viewRows = useMemo(() => {
     let data = rows;
 
     if (role === "VTKV") {
-      data = data.filter(
-        (r) =>
-          String(r.vtkv || "").toUpperCase() ===
-          String(user?.scope_code || "").toUpperCase()
-      );
+      data = data.filter((r) => up(r.vtkv) === up(user?.scope_code));
+    } else if (role === "CNKD") {
+      data = data.filter((r) => up(r.cnkd) === up(user?.scope_code));
     } else if (selectedVTKV !== "ALL") {
-      data = data.filter(
-        (r) =>
-          String(r.vtkv || "").toUpperCase() === selectedVTKV.toUpperCase()
-      );
+      data = data.filter((r) => up(r.vtkv) === up(selectedVTKV));
     }
 
     if (selectedMonth !== "ALL") {
@@ -119,429 +113,362 @@ export default function DashboardPage() {
     }
 
     return data;
-  }, [rows, selectedVTKV, selectedMonth, role, user]);
+  }, [rows, role, user, selectedVTKV, selectedMonth]);
 
   const stats = useMemo(() => {
     const total = viewRows.length;
 
     const contacted = viewRows.filter(
-      (x) => norm(x.latest_contact_status) === "CONTACTED"
+      (r) => up(r.latest_contact_status) === "CONTACTED"
     ).length;
 
     const recovered = viewRows.filter(
-      (x) => norm(x.latest_recovery_result) === "RECOVERED"
+      (r) => up(r.latest_recovery_result) === "RECOVERED"
+    ).length;
+
+    const pending = viewRows.filter((r) =>
+      ["PENDING", "FOLLOW_UP", "PROCESSING", ""].includes(
+        up(r.latest_recovery_result || r.latest_workflow_status)
+      )
     ).length;
 
     const closed = viewRows.filter(
-      (x) => norm(x.latest_workflow_status) === "COMPLETED"
+      (r) => up(r.latest_workflow_status) === "COMPLETED"
     ).length;
-
-    const failed = viewRows.filter(
-      (x) =>
-        norm(x.latest_recovery_result) === "FAILED" ||
-        norm(x.latest_recovery_result) === "NOT_RECOVERED"
-    ).length;
-
-    const over7 = viewRows.filter((x) => Number(x.days_suspend || 0) > 7).length;
-    const over15 = viewRows.filter((x) => Number(x.days_suspend || 0) > 15).length;
-    const over30 = viewRows.filter((x) => Number(x.days_suspend || 0) > 30).length;
 
     return {
       total,
       contacted,
-      notContacted: total - contacted,
       recovered,
-      failed,
-      pending: total - recovered - failed,
+      pending,
       closed,
-      over7,
-      over15,
-      over30,
       contactRate: pct(contacted, total),
       recoveryRate: pct(recovered, total),
+      pendingRate: pct(pending, total),
+      closeRate: pct(closed, total),
     };
   }, [viewRows]);
 
-  const topL1 = useMemo(() => topCount(viewRows, "latest_reason_l1_name", 10), [viewRows]);
-  const topL2 = useMemo(() => topCount(viewRows, "latest_reason_l2_name", 10), [viewRows]);
-  const byCNKD = useMemo(() => groupStats(viewRows, "cnkd"), [viewRows]);
-  const byVTKV = useMemo(() => groupStats(viewRows, "vtkv"), [viewRows]);
-
-  const trendByDate = useMemo(() => {
-    const map = new Map<string, number>();
+  const trend = useMemo(() => {
+    const map = new Map<string, any>();
 
     viewRows.forEach((r) => {
-      const d = String(r.suspend_date || "").trim();
+      const d = String(r.suspend_date || "").slice(0, 10);
       if (!d) return;
-      map.set(d, (map.get(d) || 0) + 1);
+
+      if (!map.has(d)) {
+        map.set(d, {
+          date: d.slice(5),
+          suspend: 0,
+          contacted: 0,
+          recovered: 0,
+          closed: 0,
+        });
+      }
+
+      const x = map.get(d);
+      x.suspend += 1;
+      if (up(r.latest_contact_status) === "CONTACTED") x.contacted += 1;
+      if (up(r.latest_recovery_result) === "RECOVERED") x.recovered += 1;
+      if (up(r.latest_workflow_status) === "COMPLETED") x.closed += 1;
     });
 
-    return Array.from(map.entries())
-      .map(([date, value]) => ({ date, value }))
-      .sort((a, b) => a.date.localeCompare(b.date));
+    return Array.from(map.values()).sort((a, b) =>
+      String(a.date).localeCompare(String(b.date))
+    );
   }, [viewRows]);
 
-  const recoveryPie = useMemo(() => {
-    return [
-      { name: "Đã khôi phục", value: stats.recovered },
-      { name: "Không khôi phục", value: stats.failed },
-      { name: "Đang xử lý", value: stats.pending },
-    ].filter((x) => x.value > 0);
-  }, [stats]);
+  const topReason1 = useMemo(
+    () => topCount(viewRows, "latest_reason_l1_name", stats.total),
+    [viewRows, stats.total]
+  );
 
-  function goList(filter: string) {
-    const params = new URLSearchParams();
-    params.set("filter", filter);
+  const topReason2 = useMemo(
+    () => topCount(viewRows, "latest_reason_l2_name", stats.total),
+    [viewRows, stats.total]
+  );
 
-    if (selectedVTKV && selectedVTKV !== "ALL") {
-      params.set("vtkv", selectedVTKV);
-    }
-
-    if (selectedMonth && selectedMonth !== "ALL") {
-      params.set("month", selectedMonth);
-    }
-
-    router.push(`/subscribers?${params.toString()}`);
-  }
-
-  function exportDashboardCsv() {
-    const kpiRows = [
-      ["Chỉ tiêu", "Giá trị"],
-      ["VTKV", selectedVTKV],
-      ["Tháng", selectedMonth],
-      ["Tổng Account", stats.total],
-      ["Đã tiếp xúc", stats.contacted],
-      ["Chưa tiếp xúc", stats.notContacted],
-      ["Đã khôi phục", stats.recovered],
-      ["Không khôi phục", stats.failed],
-      ["Đang xử lý", stats.pending],
-      ["Đã đóng việc", stats.closed],
-      ["Tồn > 7 ngày", stats.over7],
-      ["Tồn > 15 ngày", stats.over15],
-      ["Tồn > 30 ngày", stats.over30],
-      ["Tỷ lệ tiếp xúc", `${stats.contactRate}%`],
-      ["Tỷ lệ khôi phục", `${stats.recoveryRate}%`],
-    ];
-
-    const csv = kpiRows
-      .map((row) => row.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","))
-      .join("\n");
-
-    const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-
-    a.href = url;
-    a.download = `dashboard_${selectedVTKV}_${selectedMonth}.csv`;
-    a.click();
-
-    URL.revokeObjectURL(url);
+  function logout() {
+    localStorage.removeItem("ftth_token");
+    localStorage.removeItem("ftth_user");
+    router.push("/login");
   }
 
   return (
-    <main className="min-h-screen bg-slate-100 p-6">
-      <div className="rounded-3xl bg-gradient-to-r from-teal-700 via-teal-600 to-cyan-600 p-6 text-white shadow-xl mb-6">
-        <div className="flex justify-between items-center gap-6">
-          <div>
-            <div className="text-sm opacity-80">FTTH RECOVERY DASHBOARD</div>
-
-            <h1 className="text-4xl font-black mt-2">
-              Điều hành khôi phục thuê bao
-            </h1>
-
-            <div className="mt-2">
-              {user?.full_name} | {user?.role} | {user?.scope_code}
-            </div>
-          </div>
-
-          <AppMenu user={user} />
-        </div>
-      </div>
-
-      <div className="bg-white rounded-2xl shadow p-5 mb-6 flex items-center justify-between gap-4">
-        <div>
-          <p className="font-bold text-lg">Bộ lọc Dashboard</p>
-          <p className="text-gray-500 text-sm mt-1">
-            Chọn ALL để xem toàn chi nhánh hoặc chọn từng VTKV/tháng.
-          </p>
+    <main className="min-h-screen bg-[#f8fafc] flex">
+      <aside className="w-[250px] bg-white border-r min-h-screen p-5 hidden lg:block">
+        <div className="text-xl font-black text-blue-600 mb-8">
+          FTTH Recovery
         </div>
 
-        <div className="flex items-center gap-3 flex-wrap justify-end">
-          <span className="font-semibold">VTKV</span>
+        <Nav active label="Dashboard KPI" onClick={() => router.push("/dashboard")} />
+        <Nav label="Danh sách thuê bao" onClick={() => router.push("/subscribers")} />
+        <Nav label="Cập nhật lịch sử" onClick={() => router.push("/subscribers")} />
+        <Nav label="Import Excel" onClick={() => router.push("/import")} />
+        <Nav label="Nhật ký hệ thống" onClick={() => {}} />
+        <Nav label="Quản lý người dùng" onClick={() => {}} />
+        <Nav label="Cấu hình" onClick={() => {}} />
+        <Nav label="Hướng dẫn" onClick={() => {}} />
 
-          <select
-            value={selectedVTKV}
-            disabled={role === "VTKV" || role === "CNKD"}
-            onChange={(e) => setSelectedVTKV(e.target.value)}
-            className="border rounded-xl px-4 py-3 min-w-[220px] font-semibold"
-          >
-            {role === "CN" && <option value="ALL">ALL - Toàn chi nhánh</option>}
-
-            {vtkvList.map((v) => (
-              <option key={v} value={v}>
-                {v}
-              </option>
-            ))}
-          </select>
-
-          <span className="font-semibold">Tháng</span>
-
-          <select
-            value={selectedMonth}
-            onChange={(e) => setSelectedMonth(e.target.value)}
-            className="border rounded-xl px-4 py-3 min-w-[180px] font-semibold"
-          >
-            <option value="ALL">ALL - Tất cả tháng</option>
-
-            {monthList.map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
-
-          <button
-            onClick={exportDashboardCsv}
-            className="bg-green-600 text-white rounded-xl px-5 py-3 font-bold"
-          >
-            Export CSV
+        <div className="absolute bottom-6 left-5 text-sm">
+          <div className="font-bold">{user?.full_name}</div>
+          <div className="text-gray-500">{user?.scope_code}</div>
+          <button onClick={logout} className="text-red-600 font-bold mt-4">
+            Đăng xuất
           </button>
         </div>
-      </div>
+      </aside>
 
-      {loading ? (
-        <div className="bg-white rounded-2xl p-8">Đang tải dữ liệu...</div>
-      ) : (
-        <>
-          <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-5 gap-4 mb-6">
-            <Card title="Tổng Account" value={stats.total} onClick={() => goList("all")} />
-            <Card title="Đã tiếp xúc" value={stats.contacted} onClick={() => goList("contacted")} />
-            <Card title="Chưa tiếp xúc" value={stats.notContacted} onClick={() => goList("not_contacted")} />
-            <Card title="Đã khôi phục" value={stats.recovered} onClick={() => goList("recovered")} />
-            <Card title="Không khôi phục" value={stats.failed} onClick={() => goList("failed")} />
-            <Card title="Đang xử lý" value={stats.pending} onClick={() => goList("pending")} />
-            <Card title="Đã đóng việc" value={stats.closed} onClick={() => goList("closed")} />
-            <Card title="Tồn > 7 ngày" value={stats.over7} onClick={() => goList("over7")} />
-            <Card title="Tồn > 15 ngày" value={stats.over15} onClick={() => goList("over15")} />
-            <Card title="Tồn > 30 ngày" value={stats.over30} onClick={() => goList("over30")} />
+      <section className="flex-1">
+        <header className="h-[64px] bg-white border-b flex items-center justify-between px-6">
+          <div className="flex items-center gap-4">
+            <button className="text-2xl">☰</button>
+            <h1 className="font-black text-xl">Dashboard KPI</h1>
           </div>
 
-          <div className="grid xl:grid-cols-3 gap-6 mb-6">
-            <Panel title="Cơ cấu kết quả khôi phục">
-              <div className="h-[280px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={recoveryPie}
-                      dataKey="value"
-                      nameKey="name"
-                      outerRadius={90}
-                      label
-                    >
-                      {recoveryPie.map((_, index) => (
-                        <Cell
-                          key={`cell-${index}`}
-                          fill={["#10b981", "#ef4444", "#f59e0b"][index % 3]}
-                        />
+          <div className="flex gap-3">
+            <select
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+              className="inputBox"
+            >
+              <option value="ALL">Tất cả tháng</option>
+              {monthList.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={selectedVTKV}
+              disabled={role === "VTKV" || role === "CNKD"}
+              onChange={(e) => setSelectedVTKV(e.target.value)}
+              className="inputBox"
+            >
+              {role === "CN" && <option value="ALL">Tất cả VTKV</option>}
+              {vtkvList.map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              ))}
+            </select>
+          </div>
+        </header>
+
+        <div className="p-6">
+          {loading ? (
+            <div className="bg-white rounded-2xl p-8 shadow">Đang tải dữ liệu...</div>
+          ) : (
+            <>
+              <section className="bg-white rounded-2xl shadow p-6 mb-6">
+                <h2 className="font-black text-xl mb-6">Dashboard KPI</h2>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-0 divide-x">
+                  <DonutCard
+                    title="1. Tỷ lệ tiếp xúc"
+                    rate={stats.contactRate}
+                    done={stats.contacted}
+                    total={stats.total}
+                    color={C.blue}
+                    doneLabel="Đã tiếp xúc"
+                    remainLabel="Chưa tiếp xúc"
+                  />
+
+                  <DonutCard
+                    title="2. Tỷ lệ khôi phục"
+                    rate={stats.recoveryRate}
+                    done={stats.recovered}
+                    total={stats.total}
+                    color={C.green}
+                    doneLabel="Đã khôi phục"
+                    remainLabel="Chưa khôi phục"
+                  />
+
+                  <DonutCard
+                    title="3. Tỷ lệ đang xử lý"
+                    rate={stats.pendingRate}
+                    done={stats.pending}
+                    total={stats.total}
+                    color={C.orange}
+                    doneLabel="Đang xử lý"
+                    remainLabel="Đã xử lý"
+                  />
+
+                  <DonutCard
+                    title="4. Tỷ lệ đóng việc"
+                    rate={stats.closeRate}
+                    done={stats.closed}
+                    total={stats.total}
+                    color={C.purple}
+                    doneLabel="Đã đóng việc"
+                    remainLabel="Chưa đóng việc"
+                  />
+                </div>
+              </section>
+
+              <section className="bg-white rounded-2xl shadow p-6 mb-6">
+                <div className="flex justify-between items-center mb-5">
+                  <h2 className="font-black text-xl">Xu hướng phục hồi theo ngày</h2>
+                  <div className="text-sm text-gray-500">
+                    Tạm ngưng / Tiếp xúc / Khôi phục / Đóng việc
+                  </div>
+                </div>
+
+                <div className="h-[310px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={trend}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="date" />
+                      <YAxis allowDecimals={false} />
+                      <Tooltip />
+                      <Legend />
+                      <Line dataKey="suspend" name="Tạm ngưng" stroke={C.blue} strokeWidth={3} />
+                      <Line dataKey="contacted" name="Tiếp xúc" stroke={C.green} strokeWidth={3} />
+                      <Line dataKey="recovered" name="Khôi phục" stroke={C.orange} strokeWidth={3} />
+                      <Line dataKey="closed" name="Đóng việc" stroke={C.purple} strokeWidth={3} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </section>
+
+              <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
+                <section className="xl:col-span-3 bg-white rounded-2xl shadow p-6">
+                  <h2 className="font-black text-xl mb-5">
+                    Top nguyên nhân tạm ngưng
+                  </h2>
+
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr>
+                        <Th>#</Th>
+                        <Th>Nguyên nhân cấp 1</Th>
+                        <Th>Số lượng</Th>
+                        <Th>Tỷ lệ</Th>
+                        <Th>Nguyên nhân cấp 2 phổ biến</Th>
+                        <Th>Số lượng</Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {topReason1.slice(0, 5).map((r, i) => (
+                        <tr key={r.name} className="border-t">
+                          <Td>{i + 1}</Td>
+                          <Td>{r.name}</Td>
+                          <Td>{num(r.value)}</Td>
+                          <Td>{r.rate}%</Td>
+                          <Td>{topReason2[i]?.name || ""}</Td>
+                          <Td>{topReason2[i]?.value || ""}</Td>
+                        </tr>
                       ))}
-                    </Pie>
-                    <Tooltip />
-                    <Legend />
-                  </PieChart>
-                </ResponsiveContainer>
+                    </tbody>
+                  </table>
+                </section>
+
+                <section className="bg-white rounded-2xl shadow p-6">
+                  <h2 className="font-black text-xl mb-5">Tổng quan tháng</h2>
+                  <Summary label="Tổng thuê bao tạm ngưng" value={stats.total} />
+                  <Summary label="Đã tiếp xúc" value={stats.contacted} />
+                  <Summary label="Đã khôi phục" value={stats.recovered} />
+                  <Summary label="Đang xử lý" value={stats.pending} />
+                  <Summary label="Đã đóng việc" value={stats.closed} />
+                  <Summary label="Chưa tiếp xúc" value={stats.total - stats.contacted} />
+                </section>
               </div>
-            </Panel>
-
-            <Panel title="Top nguyên nhân cấp 1">
-              <BarBlock data={topL1} dataKey="value" nameKey="name" />
-            </Panel>
-
-            <Panel title="Top nguyên nhân cấp 2">
-              <BarBlock data={topL2} dataKey="value" nameKey="name" />
-            </Panel>
-          </div>
-
-          <div className="grid xl:grid-cols-2 gap-6 mb-6">
-            <Panel title={selectedVTKV === "ALL" ? "Top VTKV tồn nhiều nhất" : "Top CNKD tồn nhiều nhất"}>
-              <BarBlock
-                data={(selectedVTKV === "ALL" ? byVTKV : byCNKD).slice(0, 10)}
-                dataKey="total"
-                nameKey="name"
-              />
-            </Panel>
-
-            <Panel title="Xu hướng tạm ngưng theo ngày">
-              <div className="h-[320px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={trendByDate}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="date" />
-                    <YAxis allowDecimals={false} />
-                    <Tooltip />
-                    <Line
-                      type="monotone"
-                      dataKey="value"
-                      stroke="#0f766e"
-                      strokeWidth={3}
-                      dot={{ r: 3 }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            </Panel>
-          </div>
-
-          {role === "CN" && selectedVTKV === "ALL" && (
-            <Panel title="Thống kê theo VTKV">
-              <StatsTable data={byVTKV} label="VTKV" />
-            </Panel>
+            </>
           )}
-
-          {(role === "CN" || role === "VTKV") && (
-            <div className="mt-6">
-              <Panel title="Thống kê theo CNKD">
-                <StatsTable data={byCNKD} label="CNKD" />
-              </Panel>
-            </div>
-          )}
-        </>
-      )}
+        </div>
+      </section>
     </main>
   );
 }
 
-function Card({
+function DonutCard({
   title,
-  value,
-  onClick,
-}: {
-  title: string;
-  value: number;
-  onClick: () => void;
-}) {
+  rate,
+  done,
+  total,
+  color,
+  doneLabel,
+  remainLabel,
+}: any) {
+  const remain = Math.max(total - done, 0);
+
+  const data = [
+    { name: doneLabel, value: done },
+    { name: remainLabel, value: remain },
+  ];
+
+  return (
+    <div className="px-6">
+      <div className="flex justify-between">
+        <div>
+          <div className="font-black">{title}</div>
+          <div className="text-3xl font-black mt-4" style={{ color }}>
+            {rate}%
+          </div>
+          <div className="text-gray-500 mt-2">
+            {num(done)} / {num(total)} thuê bao
+          </div>
+        </div>
+        <div className="text-green-600 bg-green-50 h-fit px-3 py-1 rounded-lg text-sm font-bold">
+          ↑ KPI
+        </div>
+      </div>
+
+      <div className="h-[180px] mt-2">
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie
+              data={data}
+              innerRadius={54}
+              outerRadius={74}
+              dataKey="value"
+              startAngle={90}
+              endAngle={-270}
+            >
+              <Cell fill={color} />
+              <Cell fill={C.gray} />
+            </Pie>
+            <Tooltip />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div className="text-sm text-gray-600 space-y-1">
+        <div>
+          {doneLabel}: <b>{num(done)}</b>
+        </div>
+        <div>
+          {remainLabel}: <b>{num(remain)}</b>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Nav({ label, active, onClick }: any) {
   return (
     <button
       onClick={onClick}
-      className="bg-white rounded-2xl shadow p-5 text-left hover:shadow-xl hover:-translate-y-1 transition"
+      className={`w-full text-left px-4 py-3 rounded-xl mb-2 font-semibold ${
+        active ? "bg-blue-50 text-blue-600" : "hover:bg-slate-50"
+      }`}
     >
-      <div className="text-gray-500 font-semibold">{title}</div>
-      <div className="text-4xl font-black mt-3">{value}</div>
+      {label}
     </button>
   );
 }
 
-function Panel({ title, children }: any) {
+function Summary({ label, value }: any) {
   return (
-    <div className="bg-white rounded-2xl shadow p-6">
-      <h2 className="font-black text-2xl mb-5">{title}</h2>
-      {children}
+    <div className="flex justify-between py-3 border-b">
+      <span className="text-gray-600">{label}</span>
+      <b>{num(value)}</b>
     </div>
   );
 }
 
-function BarBlock({ data, dataKey, nameKey }: any) {
-  if (!data || data.length === 0) {
-    return <div className="text-gray-500">Chưa có dữ liệu</div>;
-  }
-
-  return (
-    <div className="h-[320px]">
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} layout="vertical" margin={{ left: 30, right: 20 }}>
-          <CartesianGrid strokeDasharray="3 3" />
-          <XAxis type="number" allowDecimals={false} />
-          <YAxis
-            type="category"
-            dataKey={nameKey}
-            width={120}
-            tick={{ fontSize: 12 }}
-          />
-          <Tooltip />
-          <Bar dataKey={dataKey} fill="#0f766e" radius={[0, 8, 8, 0]} />
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}
-
-function StatsTable({ data, label }: any) {
-  return (
-    <div className="overflow-auto">
-      <table className="w-full text-sm">
-        <thead className="bg-gray-100">
-          <tr>
-            <Th>{label}</Th>
-            <Th>Tổng</Th>
-            <Th>Đã TX</Th>
-            <Th>Chưa TX</Th>
-            <Th>KP</Th>
-            <Th>Không KP</Th>
-            <Th>Đang XL</Th>
-            <Th>Đóng việc</Th>
-            <Th>%TX</Th>
-            <Th>%KP</Th>
-          </tr>
-        </thead>
-
-        <tbody>
-          {data.map((r: any) => (
-            <tr key={r.name} className="border-t">
-              <Td bold>{r.name}</Td>
-              <Td>{r.total}</Td>
-              <Td>{r.contacted}</Td>
-              <Td>{r.notContacted}</Td>
-              <Td>{r.recovered}</Td>
-              <Td>{r.failed}</Td>
-              <Td>{r.pending}</Td>
-              <Td>{r.closed}</Td>
-              <Td>{r.contactRate}%</Td>
-              <Td>{r.recoveryRate}%</Td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function groupStats(rows: Row[], key: "vtkv" | "cnkd") {
-  const map = new Map<string, Row[]>();
-
-  rows.forEach((r) => {
-    const name = String(r[key] || "Không xác định").trim();
-    if (!map.has(name)) map.set(name, []);
-    map.get(name)?.push(r);
-  });
-
-  return Array.from(map.entries())
-    .map(([name, arr]) => {
-      const total = arr.length;
-      const contacted = arr.filter((x) => norm(x.latest_contact_status) === "CONTACTED").length;
-      const recovered = arr.filter((x) => norm(x.latest_recovery_result) === "RECOVERED").length;
-      const failed = arr.filter(
-        (x) =>
-          norm(x.latest_recovery_result) === "FAILED" ||
-          norm(x.latest_recovery_result) === "NOT_RECOVERED"
-      ).length;
-      const closed = arr.filter((x) => norm(x.latest_workflow_status) === "COMPLETED").length;
-
-      return {
-        name,
-        total,
-        contacted,
-        notContacted: total - contacted,
-        recovered,
-        failed,
-        pending: total - recovered - failed,
-        closed,
-        contactRate: pct(contacted, total),
-        recoveryRate: pct(recovered, total),
-      };
-    })
-    .sort((a, b) => b.total - a.total);
-}
-
-function topCount(rows: Row[], field: keyof Row, limit = 10) {
+function topCount(rows: Row[], field: keyof Row, total: number) {
   const map = new Map<string, number>();
 
   rows.forEach((r) => {
@@ -551,27 +478,30 @@ function topCount(rows: Row[], field: keyof Row, limit = 10) {
   });
 
   return Array.from(map.entries())
-    .map(([name, value]) => ({ name, value }))
-    .sort((a, b) => b.value - a.value)
-    .slice(0, limit);
+    .map(([name, value]) => ({
+      name,
+      value,
+      rate: pct(value, total),
+    }))
+    .sort((a, b) => b.value - a.value);
 }
 
 function pct(a: number, b: number) {
-  return b ? Math.round((a / b) * 100) : 0;
+  return b ? Math.round((a / b) * 1000) / 10 : 0;
 }
 
-function norm(v?: string) {
+function up(v?: string) {
   return String(v || "").trim().toUpperCase();
 }
 
-function Th({ children }: any) {
-  return <th className="text-left p-4 font-bold whitespace-nowrap">{children}</th>;
+function num(v: any) {
+  return Number(v || 0).toLocaleString("vi-VN");
 }
 
-function Td({ children, bold }: any) {
-  return (
-    <td className={`p-4 whitespace-nowrap ${bold ? "font-bold" : ""}`}>
-      {children}
-    </td>
-  );
+function Th({ children }: any) {
+  return <th className="text-left p-3 font-bold text-gray-600">{children}</th>;
+}
+
+function Td({ children }: any) {
+  return <td className="p-3 whitespace-nowrap">{children}</td>;
 }
