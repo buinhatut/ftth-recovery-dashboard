@@ -49,6 +49,7 @@ const PAGE_SIZE = 30;
 export default function DashboardPage() {
   const router = useRouter();
   const dashboardRef = useRef<HTMLDivElement | null>(null);
+  const chartExportRef = useRef<HTMLDivElement | null>(null);
 
   const [user, setUser] = useState<any>(null);
   const [rows, setRows] = useState<Row[]>([]);
@@ -234,7 +235,7 @@ export default function DashboardPage() {
   }
 
   async function exportDashboardPNG(mode: "download" | "copy") {
-    const element = dashboardRef.current;
+    const element = chartExportRef.current;
     if (!element) return;
 
     setExporting(true);
@@ -242,7 +243,7 @@ export default function DashboardPage() {
     try {
       await new Promise((r) => setTimeout(r, 500));
 
-      const filename = `ftth-recovery-${activeMonth}-${
+      const filename = `ftth-charts-${activeMonth}-${
         selectedVTKV === "ALL" ? "ALL" : selectedVTKV
       }.png`;
 
@@ -360,7 +361,7 @@ export default function DashboardPage() {
               disabled={exporting}
               className="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold disabled:opacity-50"
             >
-              {exporting ? "Đang xuất..." : "Tải PNG"}
+              {exporting ? "Đang xuất..." : "Tải Chart PNG"}
             </button>
 
             <button
@@ -472,6 +473,16 @@ export default function DashboardPage() {
                   onClick={() => goList("recovered")}
                 />
               </div>
+
+              <div ref={chartExportRef} className="bg-white p-4">
+                <div className="mb-5">
+                  <h2 className="text-2xl font-black">
+                    Chart FTTH Recovery - {selectedVTKV === "ALL" ? "Toàn HNI" : selectedVTKV}
+                  </h2>
+                  <p className="text-sm text-slate-500">
+                    Tháng báo cáo: {activeMonth} | Thời điểm xuất: {new Date().toLocaleString("vi-VN")}
+                  </p>
+                </div>
 
               <div className="grid grid-cols-1 xl:grid-cols-4 gap-6 mb-6">
                 <section className="xl:col-span-3 bg-white rounded-2xl shadow p-6">
@@ -631,6 +642,8 @@ export default function DashboardPage() {
                     name="Nguyên nhân cấp 2"
                   />
                 </ChartCard>
+              </div>
+
               </div>
 
               {role !== "CNKD" && (
