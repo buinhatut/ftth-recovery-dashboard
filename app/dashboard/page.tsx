@@ -6,9 +6,12 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
+  ComposedChart,
   Legend,
   Line,
-  LineChart,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -24,6 +27,8 @@ type Row = {
   suspend_month?: string;
   suspend_reason?: string;
   latest_contact_status?: string;
+  latest_reason_l1_name?: string;
+  latest_reason_l2_name?: string;
   latest_recovery_result?: string;
   latest_workflow_status?: string;
   days_suspend?: number | string;
@@ -35,7 +40,9 @@ const COLORS = {
   orange: "#f97316",
   red: "#dc2626",
   purple: "#7c3aed",
+  teal: "#0f766e",
   slate: "#475569",
+  gray: "#e5e7eb",
 };
 
 export default function DashboardPage() {
@@ -118,15 +125,20 @@ export default function DashboardPage() {
   const yesterday = getYesterday();
 
   const todayRows = viewRows.filter((r) => dateOnly(r.suspend_date) === today);
-  const yesterdayRows = viewRows.filter((r) => dateOnly(r.suspend_date) === yesterday);
+  const yesterdayRows = viewRows.filter(
+    (r) => dateOnly(r.suspend_date) === yesterday
+  );
 
   const monthStats = useMemo(() => buildStats(viewRows), [viewRows]);
   const todayStats = useMemo(() => buildStats(todayRows), [todayRows]);
   const yesterdayStats = useMemo(() => buildStats(yesterdayRows), [yesterdayRows]);
 
-  const reasonMonth = useMemo(() => reasonCount(viewRows), [viewRows]);
-  const reasonToday = useMemo(() => reasonCount(todayRows), [todayRows]);
-  const reasonYesterday = useMemo(() => reasonCount(yesterdayRows), [yesterdayRows]);
+  const reasonMonth = useMemo(() => suspendReasonCount(viewRows), [viewRows]);
+  const reasonToday = useMemo(() => suspendReasonCount(todayRows), [todayRows]);
+  const reasonYesterday = useMemo(
+    () => suspendReasonCount(yesterdayRows),
+    [yesterdayRows]
+  );
 
   const trendData = useMemo(() => {
     const map = new Map<string, any>();
@@ -137,6 +149,7 @@ export default function DashboardPage() {
 
       if (!map.has(d)) {
         map.set(d, {
+          raw: d,
           date: d.slice(5),
           suspend: 0,
           contact: 0,
@@ -154,11 +167,45 @@ export default function DashboardPage() {
     });
 
     return Array.from(map.values()).sort((a, b) =>
-      String(a.date).localeCompare(String(b.date))
+      String(a.raw).localeCompare(String(b.raw))
     );
   }, [viewRows]);
 
   const byVTKV = useMemo(() => groupByVTKV(viewRows), [viewRows]);
+
+  const vtkvSuspendChart = useMemo(() => {
+    return byVTKV
+      .map((x) => ({
+        name: x.name,
+        value: x.total,
+      }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 15);
+  }, [byVTKV]);
+
+  const suspendReasonChart = useMemo(() => {
+    return [
+      { name: "KHYC", value: reasonMonth.KHYC || 0, color: COLORS.blue },
+      {
+        name: "Nợ cước",
+        value: reasonMonth["Nợ cước"] || 0,
+        color: COLORS.orange,
+      },
+      {
+        name: "KHYC+NC",
+        value: reasonMonth["KHYC+NC"] || 0,
+        color: COLORS.purple,
+      },
+    ];
+  }, [reasonMonth]);
+
+  const reasonL1Chart = useMemo(() => {
+    return topCount(viewRows, "latest_reason_l1_name", 10);
+  }, [viewRows]);
+
+  const reasonL2Chart = useMemo(() => {
+    return topCount(viewRows, "latest_reason_l2_name", 10);
+  }, [viewRows]);
 
   function goList(filter: string) {
     const params = new URLSearchParams();
@@ -205,7 +252,7 @@ export default function DashboardPage() {
           <div>
             <h1 className="font-black text-xl">Dashboard tạm ngưng tháng</h1>
             <p className="text-xs text-slate-500">
-              Theo dõi tạm ngưng ngày N, N-1, lý do KHYC / Nợ cước / KHYC+NC
+              Điều hành ngày N, N-1, lý do tạm ngưng và nguyên nhân cấp 1/cấp 2
             </p>
           </div>
 
@@ -241,14 +288,16 @@ export default function DashboardPage() {
 
         <div className="p-6">
           {loading ? (
-            <div className="bg-white rounded-2xl p-8 shadow">Đang tải dữ liệu...</div>
+            <div className="bg-white rounded-2xl p-8 shadow">
+              Đang tải dữ liệu...
+            </div>
           ) : (
             <>
               <div className="grid grid-cols-1 xl:grid-cols-4 gap-5 mb-6">
                 <MainCard
                   title="Tạm ngưng tháng"
                   value={monthStats.total}
-                  subtitle={`Tháng ${selectedMonth}`}
+                  subtitle={selectedMonth === "ALL" ? "Tất cả tháng" : `Tháng ${selectedMonth}`}
                   color={COLORS.blue}
                   reasons={reasonMonth}
                   onClick={() => goList("all")}
@@ -279,13 +328,14 @@ export default function DashboardPage() {
                 />
 
                 <MainCard
-                  title="Cảnh báo tồn xử lý"
+                  title="Tồn chưa tiếp xúc"
                   value={monthStats.notContacted}
-                  subtitle="Chưa tiếp xúc trong tháng"
+                  subtitle="Cần điều hành xử lý"
                   color={COLORS.purple}
                   extra={[
                     ["Đang xử lý", monthStats.pending],
                     ["> 7 ngày", monthStats.over7],
+                    ["> 15 ngày", monthStats.over15],
                     ["Đã đóng việc", monthStats.closed],
                   ]}
                   onClick={() => goList("not_contacted")}
@@ -306,20 +356,115 @@ export default function DashboardPage() {
 
                 <div className="h-[340px]">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={trendData}>
+                    <ComposedChart data={trendData}>
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis dataKey="date" />
                       <YAxis allowDecimals={false} />
                       <Tooltip />
                       <Legend />
-                      <Bar dataKey="suspend" name="Tạm ngưng" fill={COLORS.blue} radius={[6, 6, 0, 0]} />
-                      <Line type="monotone" dataKey="contact" name="Tiếp xúc" stroke={COLORS.green} strokeWidth={3} />
-                      <Line type="monotone" dataKey="recovery" name="Khôi phục" stroke={COLORS.orange} strokeWidth={3} />
-                      <Line type="monotone" dataKey="close" name="Đóng việc" stroke={COLORS.purple} strokeWidth={3} />
-                    </BarChart>
+                      <Bar
+                        dataKey="suspend"
+                        name="Tạm ngưng"
+                        fill={COLORS.blue}
+                        radius={[6, 6, 0, 0]}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="contact"
+                        name="Tiếp xúc"
+                        stroke={COLORS.green}
+                        strokeWidth={3}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="recovery"
+                        name="Khôi phục"
+                        stroke={COLORS.orange}
+                        strokeWidth={3}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="close"
+                        name="Đóng việc"
+                        stroke={COLORS.purple}
+                        strokeWidth={3}
+                      />
+                    </ComposedChart>
                   </ResponsiveContainer>
                 </div>
               </section>
+
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
+                <ChartCard title="Top VTKV tạm ngưng trong tháng">
+                  <VerticalBarChart
+                    data={vtkvSuspendChart}
+                    color={COLORS.red}
+                    dataKey="value"
+                    name="Tạm ngưng"
+                  />
+                </ChartCard>
+
+                <section className="bg-white rounded-2xl shadow p-6">
+                  <h2 className="font-black text-xl mb-5">
+                    Cơ cấu lý do tạm ngưng
+                  </h2>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+                    <div className="h-[320px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={suspendReasonChart}
+                            dataKey="value"
+                            nameKey="name"
+                            innerRadius={70}
+                            outerRadius={110}
+                            label
+                          >
+                            {suspendReasonChart.map((entry) => (
+                              <Cell key={entry.name} fill={entry.color} />
+                            ))}
+                          </Pie>
+                          <Tooltip />
+                          <Legend />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    <div className="space-y-4">
+                      {suspendReasonChart.map((r) => (
+                        <ProgressLine
+                          key={r.name}
+                          label={r.name}
+                          value={r.value}
+                          total={monthStats.total}
+                          color={r.color}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </section>
+              </div>
+
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
+                <ChartCard title="Nguyên nhân cấp 1">
+                  <VerticalBarChart
+                    data={reasonL1Chart}
+                    color={COLORS.teal}
+                    dataKey="value"
+                    name="Nguyên nhân cấp 1"
+                  />
+                </ChartCard>
+
+                <ChartCard title="Nguyên nhân cấp 2">
+                  <VerticalBarChart
+                    data={reasonL2Chart}
+                    color={COLORS.orange}
+                    dataKey="value"
+                    name="Nguyên nhân cấp 2"
+                  />
+                </ChartCard>
+              </div>
 
               <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
                 <section className="xl:col-span-2 bg-white rounded-2xl shadow p-6">
@@ -327,10 +472,7 @@ export default function DashboardPage() {
                     Cơ cấu lý do tạm ngưng
                   </h2>
 
-                  <ReasonTable
-                    total={monthStats.total}
-                    reason={reasonMonth}
-                  />
+                  <ReasonTable total={monthStats.total} reason={reasonMonth} />
                 </section>
 
                 <section className="bg-white rounded-2xl shadow p-6">
@@ -343,6 +485,7 @@ export default function DashboardPage() {
                   <Summary label="Đã khôi phục" value={monthStats.recovered} />
                   <Summary label="Chưa tiếp xúc" value={monthStats.notContacted} />
                   <Summary label="Tồn > 7 ngày" value={monthStats.over7} />
+                  <Summary label="Tồn > 15 ngày" value={monthStats.over15} />
                 </section>
               </div>
 
@@ -363,15 +506,64 @@ export default function DashboardPage() {
   );
 }
 
-function MainCard({ title, value, subtitle, color, reasons, extra, delta, onClick }: any) {
+function ChartCard({ title, children }: any) {
+  return (
+    <section className="bg-white rounded-2xl shadow p-6">
+      <h2 className="font-black text-xl mb-5">{title}</h2>
+      {children}
+    </section>
+  );
+}
+
+function VerticalBarChart({ data, color, dataKey, name }: any) {
+  if (!data || data.length === 0) {
+    return (
+      <div className="h-[360px] flex items-center justify-center text-slate-500">
+        Chưa có dữ liệu
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-[360px]">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart
+          data={data}
+          layout="vertical"
+          margin={{ left: 40, right: 20 }}
+        >
+          <CartesianGrid strokeDasharray="3 3" />
+          <XAxis type="number" allowDecimals={false} />
+          <YAxis
+            type="category"
+            dataKey="name"
+            width={130}
+            tick={{ fontSize: 12 }}
+          />
+          <Tooltip />
+          <Bar dataKey={dataKey} name={name} fill={color} radius={[0, 8, 8, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function MainCard({
+  title,
+  value,
+  subtitle,
+  color,
+  reasons,
+  extra,
+  delta,
+  onClick,
+}: any) {
   return (
     <button
       onClick={onClick}
       className="bg-white rounded-2xl shadow p-5 text-left hover:shadow-xl transition"
     >
-      <div className="text-sm font-bold text-slate-500 uppercase">
-        {title}
-      </div>
+      <div className="text-sm font-bold text-slate-500 uppercase">{title}</div>
 
       <div className="text-5xl font-black mt-3" style={{ color }}>
         {num(value)}
@@ -382,7 +574,11 @@ function MainCard({ title, value, subtitle, color, reasons, extra, delta, onClic
       {typeof delta === "number" && (
         <div
           className={`mt-3 font-black ${
-            delta > 0 ? "text-red-600" : delta < 0 ? "text-green-600" : "text-slate-500"
+            delta > 0
+              ? "text-red-600"
+              : delta < 0
+              ? "text-green-600"
+              : "text-slate-500"
           }`}
         >
           {delta > 0 ? "↑" : delta < 0 ? "↓" : "→"} {delta > 0 ? "+" : ""}
@@ -420,6 +616,29 @@ function ReasonLine({ label, value, color }: any) {
         <span>{label}</span>
       </div>
       <b>{num(value)}</b>
+    </div>
+  );
+}
+
+function ProgressLine({ label, value, total, color }: any) {
+  return (
+    <div>
+      <div className="flex justify-between text-sm font-bold mb-1">
+        <span>{label}</span>
+        <span>
+          {num(value)} - {pct(value, total)}%
+        </span>
+      </div>
+
+      <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
+        <div
+          className="h-full rounded-full"
+          style={{
+            width: `${pct(value, total)}%`,
+            background: color,
+          }}
+        />
+      </div>
     </div>
   );
 }
@@ -503,11 +722,24 @@ function StatsTable({ data }: any) {
 function buildStats(data: Row[]) {
   const total = data.length;
 
-  const contacted = data.filter((r) => up(r.latest_contact_status) === "CONTACTED").length;
-  const recovered = data.filter((r) => up(r.latest_recovery_result) === "RECOVERED").length;
-  const closed = data.filter((r) => up(r.latest_workflow_status) === "COMPLETED").length;
-  const failed = data.filter((r) => ["FAILED", "NOT_RECOVERED"].includes(up(r.latest_recovery_result))).length;
+  const contacted = data.filter(
+    (r) => up(r.latest_contact_status) === "CONTACTED"
+  ).length;
+
+  const recovered = data.filter(
+    (r) => up(r.latest_recovery_result) === "RECOVERED"
+  ).length;
+
+  const closed = data.filter(
+    (r) => up(r.latest_workflow_status) === "COMPLETED"
+  ).length;
+
+  const failed = data.filter((r) =>
+    ["FAILED", "NOT_RECOVERED"].includes(up(r.latest_recovery_result))
+  ).length;
+
   const over7 = data.filter((r) => Number(r.days_suspend || 0) > 7).length;
+  const over15 = data.filter((r) => Number(r.days_suspend || 0) > 15).length;
 
   return {
     total,
@@ -518,12 +750,13 @@ function buildStats(data: Row[]) {
     failed,
     pending: total - recovered - failed,
     over7,
+    over15,
     contactRate: pct(contacted, total),
     recoveryRate: pct(recovered, total),
   };
 }
 
-function reasonCount(data: Row[]) {
+function suspendReasonCount(data: Row[]) {
   const r: any = {
     KHYC: 0,
     "Nợ cước": 0,
@@ -532,12 +765,28 @@ function reasonCount(data: Row[]) {
 
   data.forEach((x) => {
     const reason = String(x.suspend_reason || "").trim();
+
     if (reason === "KHYC") r.KHYC++;
     else if (reason === "Nợ cước") r["Nợ cước"]++;
     else if (reason === "KHYC+NC") r["KHYC+NC"]++;
   });
 
   return r;
+}
+
+function topCount(data: Row[], field: keyof Row, limit = 10) {
+  const map = new Map<string, number>();
+
+  data.forEach((r) => {
+    const name = String(r[field] || "").trim();
+    if (!name) return;
+    map.set(name, (map.get(name) || 0) + 1);
+  });
+
+  return Array.from(map.entries())
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, limit);
 }
 
 function groupByVTKV(data: Row[]) {
@@ -620,5 +869,9 @@ function Th({ children }: any) {
 }
 
 function Td({ children, bold }: any) {
-  return <td className={`p-3 whitespace-nowrap ${bold ? "font-bold" : ""}`}>{children}</td>;
+  return (
+    <td className={`p-3 whitespace-nowrap ${bold ? "font-bold" : ""}`}>
+      {children}
+    </td>
+  );
 }
