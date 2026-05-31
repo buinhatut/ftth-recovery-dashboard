@@ -102,6 +102,12 @@ export default function DashboardPage() {
     return Array.from(s).sort().reverse();
   }, [rows]);
 
+  const activeMonth = useMemo(() => {
+    if (selectedMonth !== "ALL") return selectedMonth;
+    if (monthList.length > 0) return monthList[0];
+    return getCurrentMonth();
+  }, [selectedMonth, monthList]);
+
   const vtkvList = useMemo(() => {
     const s = new Set<string>();
     rows.forEach((r) => r.vtkv && s.add(r.vtkv));
@@ -141,24 +147,31 @@ export default function DashboardPage() {
   const reasonYesterday = useMemo(() => suspendReasonCount(yesterdayRows), [yesterdayRows]);
 
   const trendData = useMemo(() => {
-    const map = new Map<string, any>();
+    const [year, month] = activeMonth.split("-").map(Number);
+    const daysInMonth = new Date(year, month, 0).getDate();
+
+    const data = Array.from({ length: daysInMonth }, (_, i) => ({
+      day: i + 1,
+      label: String(i + 1).padStart(2, "0"),
+      suspend: 0,
+      contact: 0,
+      recovery: 0,
+      close: 0,
+    }));
 
     viewRows.forEach((r) => {
-      const d = dateOnly(r.suspend_date);
+      const d = parseLocalDate(r.suspend_date);
       if (!d) return;
 
-      if (!map.has(d)) {
-        map.set(d, {
-          raw: d,
-          date: d.slice(5),
-          suspend: 0,
-          contact: 0,
-          recovery: 0,
-          close: 0,
-        });
-      }
+      const y = d.getFullYear();
+      const m = d.getMonth() + 1;
+      const day = d.getDate();
 
-      const x = map.get(d);
+      if (y !== year || m !== month) return;
+      if (day < 1 || day > daysInMonth) return;
+
+      const x = data[day - 1];
+
       x.suspend += 1;
 
       if (up(r.latest_contact_status) === "CONTACTED") x.contact += 1;
@@ -166,10 +179,8 @@ export default function DashboardPage() {
       if (up(r.latest_workflow_status) === "COMPLETED") x.close += 1;
     });
 
-    return Array.from(map.values()).sort((a, b) =>
-      String(a.raw).localeCompare(String(b.raw))
-    );
-  }, [viewRows]);
+    return data;
+  }, [viewRows, activeMonth]);
 
   const byVTKV = useMemo(() => groupBy(viewRows, "vtkv"), [viewRows]);
   const byCNKD = useMemo(() => groupBy(viewRows, "cnkd"), [viewRows]);
@@ -290,7 +301,7 @@ export default function DashboardPage() {
                 <MainCard
                   title="Tạm ngưng tháng"
                   value={monthStats.total}
-                  subtitle={selectedMonth === "ALL" ? "Tất cả tháng" : `Tháng ${selectedMonth}`}
+                  subtitle={selectedMonth === "ALL" ? `Tháng ${activeMonth}` : `Tháng ${selectedMonth}`}
                   color={COLORS.blue}
                   reasons={reasonMonth}
                   onClick={() => goList("all")}
@@ -379,24 +390,38 @@ export default function DashboardPage() {
                         Xu hướng tạm ngưng theo ngày trong tháng
                       </h2>
                       <p className="text-sm text-slate-500">
-                        Cột: tạm ngưng | Line: tiếp xúc, khôi phục, đóng việc
+                        Cột cố định theo ngày 1 → cuối tháng | Line: tiếp xúc, khôi phục, đóng việc
                       </p>
                     </div>
                   </div>
 
                   <div className="h-[340px]">
                     <ResponsiveContainer width="100%" height="100%">
-                      <ComposedChart data={trendData}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="date" />
-                        <YAxis allowDecimals={false} />
-                        <Tooltip />
+                      <ComposedChart
+                        data={trendData}
+                        margin={{ top: 20, right: 20, left: 20, bottom: 20 }}
+                        barCategoryGap="80%"
+                        barGap={2}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                        <XAxis
+                          dataKey="day"
+                          interval={0}
+                          tick={{ fontSize: 11 }}
+                          tickFormatter={(v) => String(v).padStart(2, "0")}
+                        />
+                        <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+                        <Tooltip
+                          formatter={(value: any, name: any) => [num(value), name]}
+                          labelFormatter={(label) => `Ngày ${label}`}
+                        />
                         <Legend />
                         <Bar
                           dataKey="suspend"
                           name="Tạm ngưng"
                           fill={COLORS.blue}
-                          radius={[6, 6, 0, 0]}
+                          barSize={12}
+                          radius={[3, 3, 0, 0]}
                         />
                         <Line
                           type="monotone"
@@ -404,6 +429,8 @@ export default function DashboardPage() {
                           name="Tiếp xúc"
                           stroke={COLORS.green}
                           strokeWidth={3}
+                          dot={{ r: 3 }}
+                          activeDot={{ r: 5 }}
                         />
                         <Line
                           type="monotone"
@@ -411,6 +438,8 @@ export default function DashboardPage() {
                           name="Khôi phục"
                           stroke={COLORS.orange}
                           strokeWidth={3}
+                          dot={{ r: 3 }}
+                          activeDot={{ r: 5 }}
                         />
                         <Line
                           type="monotone"
@@ -418,6 +447,8 @@ export default function DashboardPage() {
                           name="Đóng việc"
                           stroke={COLORS.purple}
                           strokeWidth={3}
+                          dot={{ r: 3 }}
+                          activeDot={{ r: 5 }}
                         />
                       </ComposedChart>
                     </ResponsiveContainer>
@@ -795,6 +826,32 @@ function groupBy(data: Row[], field: "vtkv" | "cnkd") {
     .sort((a, b) => b.total - a.total);
 }
 
+function parseLocalDate(v?: string) {
+  if (!v) return null;
+
+  const s = String(v).slice(0, 10);
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const [y, m, d] = s.split("-").map(Number);
+    return new Date(y, m - 1, d);
+  }
+
+  if (/^\d{2}-\d{2}-\d{4}$/.test(s)) {
+    const [d, m, y] = s.split("-").map(Number);
+    return new Date(y, m - 1, d);
+  }
+
+  if (/^\d{2}-\d{2}-\d{2}$/.test(s)) {
+    const [d, m, yy] = s.split("-").map(Number);
+    return new Date(2000 + yy, m - 1, d);
+  }
+
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return null;
+
+  return d;
+}
+
 function Nav({ label, active, onClick }: any) {
   return (
     <button
@@ -815,6 +872,10 @@ function Summary({ label, value }: any) {
       <b>{numOrText(value)}</b>
     </div>
   );
+}
+
+function getCurrentMonth() {
+  return new Date().toISOString().slice(0, 7);
 }
 
 function getToday() {
@@ -854,7 +915,11 @@ function numOrText(v: any) {
 }
 
 function Th({ children }: any) {
-  return <th className="text-left p-3 font-bold text-slate-600 whitespace-nowrap">{children}</th>;
+  return (
+    <th className="text-left p-3 font-bold text-slate-600 whitespace-nowrap">
+      {children}
+    </th>
+  );
 }
 
 function Td({ children, bold }: any) {
