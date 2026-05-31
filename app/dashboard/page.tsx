@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import html2canvas from "html2canvas";
 import {
   Bar,
   BarChart,
@@ -47,6 +48,7 @@ const PAGE_SIZE = 30;
 
 export default function DashboardPage() {
   const router = useRouter();
+  const dashboardRef = useRef<HTMLDivElement | null>(null);
 
   const [user, setUser] = useState<any>(null);
   const [rows, setRows] = useState<Row[]>([]);
@@ -54,6 +56,7 @@ export default function DashboardPage() {
   const [selectedVTKV, setSelectedVTKV] = useState("ALL");
   const [loading, setLoading] = useState(true);
   const [cnkdPage, setCnkdPage] = useState(1);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     const token = localStorage.getItem("ftth_token");
@@ -152,7 +155,6 @@ export default function DashboardPage() {
 
     const data = Array.from({ length: daysInMonth }, (_, i) => ({
       day: i + 1,
-      label: String(i + 1).padStart(2, "0"),
       suspend: 0,
       contact: 0,
       recovery: 0,
@@ -231,6 +233,51 @@ export default function DashboardPage() {
     router.push("/login");
   }
 
+  async function exportDashboardPNG(mode: "download" | "copy") {
+    if (!dashboardRef.current) return;
+
+    setExporting(true);
+
+    try {
+      await new Promise((r) => setTimeout(r, 300));
+
+      const canvas = await html2canvas(dashboardRef.current, {
+        scale: 2,
+        backgroundColor: "#f8fafc",
+        useCORS: true,
+        logging: false,
+      });
+
+      const filename = `ftth-recovery-${activeMonth}-${selectedVTKV === "ALL" ? "ALL" : selectedVTKV}.png`;
+
+      if (mode === "copy" && navigator.clipboard && (window as any).ClipboardItem) {
+        const blob = await new Promise<Blob | null>((resolve) =>
+          canvas.toBlob((b) => resolve(b), "image/png")
+        );
+
+        if (blob) {
+          await navigator.clipboard.write([
+            new (window as any).ClipboardItem({
+              "image/png": blob,
+            }),
+          ]);
+
+          alert("Đã copy ảnh Dashboard. Anh có thể Paste vào WhatsApp.");
+          return;
+        }
+      }
+
+      const link = document.createElement("a");
+      link.download = filename;
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+    } catch (err: any) {
+      alert("Không export được PNG: " + err.message);
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <main className="min-h-screen bg-[#f8fafc] flex text-slate-900">
       <aside className="w-[250px] bg-white border-r border-slate-200 min-h-screen p-5 hidden lg:block relative">
@@ -289,6 +336,22 @@ export default function DashboardPage() {
                 </option>
               ))}
             </select>
+
+            <button
+              onClick={() => exportDashboardPNG("download")}
+              disabled={exporting}
+              className="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold disabled:opacity-50"
+            >
+              {exporting ? "Đang xuất..." : "Tải PNG"}
+            </button>
+
+            <button
+              onClick={() => exportDashboardPNG("copy")}
+              disabled={exporting}
+              className="px-4 py-2 rounded-xl bg-green-600 text-white font-bold disabled:opacity-50"
+            >
+              Copy PNG
+            </button>
           </div>
         </header>
 
@@ -296,7 +359,17 @@ export default function DashboardPage() {
           {loading ? (
             <div className="bg-white rounded-2xl p-8 shadow">Đang tải dữ liệu...</div>
           ) : (
-            <>
+            <div ref={dashboardRef} className="bg-[#f8fafc] p-1">
+              <div className="mb-5">
+                <h2 className="text-2xl font-black">
+                  Báo cáo FTTH Recovery - {selectedVTKV === "ALL" ? "Toàn HNI" : selectedVTKV}
+                </h2>
+                <p className="text-sm text-slate-500">
+                  Tháng báo cáo: {activeMonth} | Thời điểm xuất:{" "}
+                  {new Date().toLocaleString("vi-VN")}
+                </p>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7 gap-5 mb-6">
                 <MainCard
                   title="Tạm ngưng tháng"
@@ -578,7 +651,7 @@ export default function DashboardPage() {
 
                 <StatsTable data={cnkdPageData} firstCol="CNKD" />
               </section>
-            </>
+            </div>
           )}
         </div>
       </section>
