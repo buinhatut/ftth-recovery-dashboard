@@ -3,13 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  Bar,
+  BarChart,
   CartesianGrid,
-  Cell,
   Legend,
   Line,
   LineChart,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -23,19 +22,20 @@ type Row = {
   phone: string;
   suspend_date?: string;
   suspend_month?: string;
+  suspend_reason?: string;
   latest_contact_status?: string;
-  latest_reason_l1_name?: string;
-  latest_reason_l2_name?: string;
   latest_recovery_result?: string;
   latest_workflow_status?: string;
+  days_suspend?: number | string;
 };
 
-const COLOR = {
+const COLORS = {
   blue: "#2563eb",
   green: "#16a34a",
   orange: "#f97316",
+  red: "#dc2626",
   purple: "#7c3aed",
-  gray: "#e5e7eb",
+  slate: "#475569",
 };
 
 export default function DashboardPage() {
@@ -114,86 +114,61 @@ export default function DashboardPage() {
     return data;
   }, [rows, role, user, selectedVTKV, selectedMonth]);
 
-  const stats = useMemo(() => {
-    const total = viewRows.length;
+  const today = getToday();
+  const yesterday = getYesterday();
 
-    const contacted = viewRows.filter(
-      (r) => up(r.latest_contact_status) === "CONTACTED"
-    ).length;
+  const todayRows = viewRows.filter((r) => dateOnly(r.suspend_date) === today);
+  const yesterdayRows = viewRows.filter((r) => dateOnly(r.suspend_date) === yesterday);
 
-    const recovered = viewRows.filter(
-      (r) => up(r.latest_recovery_result) === "RECOVERED"
-    ).length;
+  const monthStats = useMemo(() => buildStats(viewRows), [viewRows]);
+  const todayStats = useMemo(() => buildStats(todayRows), [todayRows]);
+  const yesterdayStats = useMemo(() => buildStats(yesterdayRows), [yesterdayRows]);
 
-    const closed = viewRows.filter(
-      (r) => up(r.latest_workflow_status) === "COMPLETED"
-    ).length;
+  const reasonMonth = useMemo(() => reasonCount(viewRows), [viewRows]);
+  const reasonToday = useMemo(() => reasonCount(todayRows), [todayRows]);
+  const reasonYesterday = useMemo(() => reasonCount(yesterdayRows), [yesterdayRows]);
 
-    const failed = viewRows.filter((r) =>
-      ["FAILED", "NOT_RECOVERED"].includes(up(r.latest_recovery_result))
-    ).length;
-
-    const processing = total - recovered - failed;
-
-    return {
-      total,
-      contacted,
-      notContacted: total - contacted,
-      recovered,
-      notRecovered: total - recovered,
-      processing,
-      processed: total - processing,
-      closed,
-      notClosed: total - closed,
-      contactRate: pct(contacted, total),
-      recoveryRate: pct(recovered, total),
-      processingRate: pct(processing, total),
-      closeRate: pct(closed, total),
-    };
-  }, [viewRows]);
-
-  const trend = useMemo(() => {
+  const trendData = useMemo(() => {
     const map = new Map<string, any>();
 
     viewRows.forEach((r) => {
-      const raw = String(r.suspend_date || "").slice(0, 10);
-      if (!raw) return;
+      const d = dateOnly(r.suspend_date);
+      if (!d) return;
 
-      const label = raw.slice(8, 10);
-
-      if (!map.has(raw)) {
-        map.set(raw, {
-          raw,
-          date: label,
+      if (!map.has(d)) {
+        map.set(d, {
+          date: d.slice(5),
           suspend: 0,
-          contacted: 0,
-          recovered: 0,
-          closed: 0,
+          contact: 0,
+          recovery: 0,
+          close: 0,
         });
       }
 
-      const item = map.get(raw);
-      item.suspend += 1;
+      const x = map.get(d);
+      x.suspend += 1;
 
-      if (up(r.latest_contact_status) === "CONTACTED") item.contacted += 1;
-      if (up(r.latest_recovery_result) === "RECOVERED") item.recovered += 1;
-      if (up(r.latest_workflow_status) === "COMPLETED") item.closed += 1;
+      if (up(r.latest_contact_status) === "CONTACTED") x.contact += 1;
+      if (up(r.latest_recovery_result) === "RECOVERED") x.recovery += 1;
+      if (up(r.latest_workflow_status) === "COMPLETED") x.close += 1;
     });
 
     return Array.from(map.values()).sort((a, b) =>
-      String(a.raw).localeCompare(String(b.raw))
+      String(a.date).localeCompare(String(b.date))
     );
   }, [viewRows]);
 
-  const topReason1 = useMemo(
-    () => topCount(viewRows, "latest_reason_l1_name", stats.total),
-    [viewRows, stats.total]
-  );
+  const byVTKV = useMemo(() => groupByVTKV(viewRows), [viewRows]);
 
-  const topReason2 = useMemo(
-    () => topCount(viewRows, "latest_reason_l2_name", stats.total),
-    [viewRows, stats.total]
-  );
+  function goList(filter: string) {
+    const params = new URLSearchParams();
+    params.set("filter", filter);
+
+    if (selectedVTKV !== "ALL") params.set("vtkv", selectedVTKV);
+    if (selectedMonth !== "ALL") params.set("month", selectedMonth);
+
+    router.push(`/subscribers?${params.toString()}`);
+  }
 
   function logout() {
     localStorage.removeItem("ftth_token");
@@ -208,19 +183,17 @@ export default function DashboardPage() {
           FTTH Recovery
         </div>
 
-        <Nav active label="Dashboard KPI" onClick={() => router.push("/dashboard")} />
+        <Nav active label="Dashboard V2" onClick={() => router.push("/dashboard")} />
         <Nav label="Danh sách thuê bao" onClick={() => router.push("/subscribers")} />
-        <Nav label="Cập nhật lịch sử" onClick={() => router.push("/subscribers")} />
-        <Nav label="Import Excel" onClick={() => router.push("/import")} />
-        <Nav label="Nhật ký hệ thống" />
-        <Nav label="Quản lý người dùng" />
-        <Nav label="Cấu hình" />
-        <Nav label="Hướng dẫn" />
+        <Nav label="Import dữ liệu" onClick={() => router.push("/import")} />
+        <Nav label="Cấu hình lý do" />
+        <Nav label="Nhật ký cập nhật" />
 
         <div className="absolute bottom-6 left-5 right-5 text-sm">
           <div className="font-black">{user?.full_name || "User"}</div>
-          <div className="text-slate-500">{user?.scope_code || ""}</div>
-
+          <div className="text-slate-500">
+            {user?.role} | {user?.scope_code}
+          </div>
           <button onClick={logout} className="text-red-600 font-bold mt-4">
             Đăng xuất
           </button>
@@ -229,9 +202,11 @@ export default function DashboardPage() {
 
       <section className="flex-1">
         <header className="h-[64px] bg-white border-b border-slate-200 flex items-center justify-between px-6 sticky top-0 z-10">
-          <div className="flex items-center gap-4">
-            <button className="text-2xl leading-none">☰</button>
-            <h1 className="font-black text-xl">Dashboard KPI</h1>
+          <div>
+            <h1 className="font-black text-xl">Dashboard tạm ngưng tháng</h1>
+            <p className="text-xs text-slate-500">
+              Theo dõi tạm ngưng ngày N, N-1, lý do KHYC / Nợ cước / KHYC+NC
+            </p>
           </div>
 
           <div className="flex items-center gap-3">
@@ -269,159 +244,117 @@ export default function DashboardPage() {
             <div className="bg-white rounded-2xl p-8 shadow">Đang tải dữ liệu...</div>
           ) : (
             <>
-              <section className="bg-white rounded-2xl shadow p-6 mb-6">
-                <h2 className="font-black text-xl mb-6">Dashboard KPI</h2>
+              <div className="grid grid-cols-1 xl:grid-cols-4 gap-5 mb-6">
+                <MainCard
+                  title="Tạm ngưng tháng"
+                  value={monthStats.total}
+                  subtitle={`Tháng ${selectedMonth}`}
+                  color={COLORS.blue}
+                  reasons={reasonMonth}
+                  onClick={() => goList("all")}
+                />
 
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4">
-                  <DonutCard
-                    title="1. Tỷ lệ tiếp xúc"
-                    rate={stats.contactRate}
-                    done={stats.contacted}
-                    total={stats.total}
-                    color={COLOR.blue}
-                    doneLabel="Đã tiếp xúc"
-                    remainLabel="Chưa tiếp xúc"
-                  />
+                <MainCard
+                  title="Tạm ngưng ngày N"
+                  value={todayStats.total}
+                  subtitle={formatDateVi(today)}
+                  color={COLORS.red}
+                  delta={todayStats.total - yesterdayStats.total}
+                  reasons={reasonToday}
+                  onClick={() => goList("today")}
+                />
 
-                  <DonutCard
-                    title="2. Tỷ lệ khôi phục"
-                    rate={stats.recoveryRate}
-                    done={stats.recovered}
-                    total={stats.total}
-                    color={COLOR.green}
-                    doneLabel="Đã khôi phục"
-                    remainLabel="Chưa khôi phục"
-                  />
+                <MainCard
+                  title="Tạm ngưng N-1"
+                  value={yesterdayStats.total}
+                  subtitle={formatDateVi(yesterday)}
+                  color={COLORS.orange}
+                  reasons={reasonYesterday}
+                  extra={[
+                    ["Đã tiếp xúc", yesterdayStats.contacted],
+                    ["Đã khôi phục", yesterdayStats.recovered],
+                    ["% tiếp xúc", `${yesterdayStats.contactRate}%`],
+                  ]}
+                  onClick={() => goList("yesterday")}
+                />
 
-                  <DonutCard
-                    title="3. Tỷ lệ đang xử lý"
-                    rate={stats.processingRate}
-                    done={stats.processing}
-                    total={stats.total}
-                    color={COLOR.orange}
-                    doneLabel="Đang xử lý"
-                    remainLabel="Đã xử lý"
-                  />
-
-                  <DonutCard
-                    title="4. Tỷ lệ đóng việc"
-                    rate={stats.closeRate}
-                    done={stats.closed}
-                    total={stats.total}
-                    color={COLOR.purple}
-                    doneLabel="Đã đóng việc"
-                    remainLabel="Chưa đóng việc"
-                    noBorder
-                  />
-                </div>
-              </section>
+                <MainCard
+                  title="Cảnh báo tồn xử lý"
+                  value={monthStats.notContacted}
+                  subtitle="Chưa tiếp xúc trong tháng"
+                  color={COLORS.purple}
+                  extra={[
+                    ["Đang xử lý", monthStats.pending],
+                    ["> 7 ngày", monthStats.over7],
+                    ["Đã đóng việc", monthStats.closed],
+                  ]}
+                  onClick={() => goList("not_contacted")}
+                />
+              </div>
 
               <section className="bg-white rounded-2xl shadow p-6 mb-6">
                 <div className="flex justify-between items-center mb-5">
-                  <h2 className="font-black text-xl">Xu hướng phục hồi theo ngày</h2>
-
-                  <div className="text-sm text-slate-500">
-                    Tạm ngưng / Tiếp xúc / Khôi phục / Đóng việc
+                  <div>
+                    <h2 className="font-black text-xl">
+                      Xu hướng tạm ngưng theo ngày trong tháng
+                    </h2>
+                    <p className="text-sm text-slate-500">
+                      Cột: tạm ngưng | Line: tiếp xúc, khôi phục, đóng việc
+                    </p>
                   </div>
                 </div>
 
-                <div className="h-[310px]">
+                <div className="h-[340px]">
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={trend}>
+                    <BarChart data={trendData}>
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis dataKey="date" />
                       <YAxis allowDecimals={false} />
                       <Tooltip />
                       <Legend />
-                      <Line
-                        type="monotone"
-                        dataKey="suspend"
-                        name="Tạm ngưng"
-                        stroke={COLOR.blue}
-                        strokeWidth={3}
-                        dot={{ r: 3 }}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="contacted"
-                        name="Tiếp xúc"
-                        stroke={COLOR.green}
-                        strokeWidth={3}
-                        dot={{ r: 3 }}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="recovered"
-                        name="Khôi phục"
-                        stroke={COLOR.orange}
-                        strokeWidth={3}
-                        dot={{ r: 3 }}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="closed"
-                        name="Đóng việc"
-                        stroke={COLOR.purple}
-                        strokeWidth={3}
-                        dot={{ r: 3 }}
-                      />
-                    </LineChart>
+                      <Bar dataKey="suspend" name="Tạm ngưng" fill={COLORS.blue} radius={[6, 6, 0, 0]} />
+                      <Line type="monotone" dataKey="contact" name="Tiếp xúc" stroke={COLORS.green} strokeWidth={3} />
+                      <Line type="monotone" dataKey="recovery" name="Khôi phục" stroke={COLORS.orange} strokeWidth={3} />
+                      <Line type="monotone" dataKey="close" name="Đóng việc" stroke={COLORS.purple} strokeWidth={3} />
+                    </BarChart>
                   </ResponsiveContainer>
                 </div>
               </section>
 
-              <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
-                <section className="xl:col-span-3 bg-white rounded-2xl shadow p-6">
+              <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+                <section className="xl:col-span-2 bg-white rounded-2xl shadow p-6">
                   <h2 className="font-black text-xl mb-5">
-                    Top nguyên nhân tạm ngưng
+                    Cơ cấu lý do tạm ngưng
                   </h2>
 
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr>
-                        <Th>#</Th>
-                        <Th>Nguyên nhân cấp 1</Th>
-                        <Th>Số lượng</Th>
-                        <Th>Tỷ lệ</Th>
-                        <Th>Nguyên nhân cấp 2 phổ biến</Th>
-                        <Th>Số lượng</Th>
-                      </tr>
-                    </thead>
-
-                    <tbody>
-                      {topReason1.length === 0 ? (
-                        <tr>
-                          <td colSpan={6} className="p-4 text-slate-500">
-                            Chưa có dữ liệu nguyên nhân
-                          </td>
-                        </tr>
-                      ) : (
-                        topReason1.slice(0, 5).map((r, i) => (
-                          <tr key={r.name} className="border-t">
-                            <Td>{i + 1}</Td>
-                            <Td>{r.name}</Td>
-                            <Td>{num(r.value)}</Td>
-                            <Td>{r.rate}%</Td>
-                            <Td>{topReason2[i]?.name || ""}</Td>
-                            <Td>{topReason2[i]?.value ? num(topReason2[i].value) : ""}</Td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
+                  <ReasonTable
+                    total={monthStats.total}
+                    reason={reasonMonth}
+                  />
                 </section>
 
                 <section className="bg-white rounded-2xl shadow p-6">
                   <h2 className="font-black text-xl mb-5">Tổng quan tháng</h2>
 
-                  <Summary label="Tổng thuê bao tạm ngưng" value={stats.total} />
-                  <Summary label="Đã tiếp xúc" value={stats.contacted} />
-                  <Summary label="Đã khôi phục" value={stats.recovered} />
-                  <Summary label="Đang xử lý" value={stats.processing} />
-                  <Summary label="Đã đóng việc" value={stats.closed} />
-                  <Summary label="Chưa tiếp xúc" value={stats.notContacted} />
+                  <Summary label="Tạm ngưng tháng" value={monthStats.total} />
+                  <Summary label="Tạm ngưng ngày N" value={todayStats.total} />
+                  <Summary label="Tạm ngưng N-1" value={yesterdayStats.total} />
+                  <Summary label="Đã tiếp xúc" value={monthStats.contacted} />
+                  <Summary label="Đã khôi phục" value={monthStats.recovered} />
+                  <Summary label="Chưa tiếp xúc" value={monthStats.notContacted} />
+                  <Summary label="Tồn > 7 ngày" value={monthStats.over7} />
                 </section>
               </div>
+
+              {role !== "CNKD" && (
+                <section className="bg-white rounded-2xl shadow p-6 mt-6">
+                  <h2 className="font-black text-xl mb-5">
+                    Thống kê theo VTKV
+                  </h2>
+
+                  <StatsTable data={byVTKV} />
+                </section>
+              )}
             </>
           )}
         </div>
@@ -430,80 +363,198 @@ export default function DashboardPage() {
   );
 }
 
-function DonutCard({
-  title,
-  rate,
-  done,
-  total,
-  color,
-  doneLabel,
-  remainLabel,
-  noBorder,
-}: any) {
-  const remain = Math.max(total - done, 0);
+function MainCard({ title, value, subtitle, color, reasons, extra, delta, onClick }: any) {
+  return (
+    <button
+      onClick={onClick}
+      className="bg-white rounded-2xl shadow p-5 text-left hover:shadow-xl transition"
+    >
+      <div className="text-sm font-bold text-slate-500 uppercase">
+        {title}
+      </div>
 
-  const data = [
-    { name: doneLabel, value: done },
-    { name: remainLabel, value: remain },
+      <div className="text-5xl font-black mt-3" style={{ color }}>
+        {num(value)}
+      </div>
+
+      <div className="text-sm text-slate-500 mt-2">{subtitle}</div>
+
+      {typeof delta === "number" && (
+        <div
+          className={`mt-3 font-black ${
+            delta > 0 ? "text-red-600" : delta < 0 ? "text-green-600" : "text-slate-500"
+          }`}
+        >
+          {delta > 0 ? "↑" : delta < 0 ? "↓" : "→"} {delta > 0 ? "+" : ""}
+          {num(delta)} so với N-1
+        </div>
+      )}
+
+      {reasons && (
+        <div className="mt-5 space-y-2">
+          <ReasonLine label="KHYC" value={reasons.KHYC || 0} color="#2563eb" />
+          <ReasonLine label="Nợ cước" value={reasons["Nợ cước"] || 0} color="#f97316" />
+          <ReasonLine label="KHYC+NC" value={reasons["KHYC+NC"] || 0} color="#7c3aed" />
+        </div>
+      )}
+
+      {extra && (
+        <div className="mt-5 space-y-2">
+          {extra.map((x: any) => (
+            <div key={x[0]} className="flex justify-between text-sm">
+              <span className="text-slate-500">{x[0]}</span>
+              <b>{numOrText(x[1])}</b>
+            </div>
+          ))}
+        </div>
+      )}
+    </button>
+  );
+}
+
+function ReasonLine({ label, value, color }: any) {
+  return (
+    <div className="flex justify-between items-center text-sm">
+      <div className="flex items-center gap-2">
+        <span className="w-3 h-3 rounded-full" style={{ background: color }} />
+        <span>{label}</span>
+      </div>
+      <b>{num(value)}</b>
+    </div>
+  );
+}
+
+function ReasonTable({ reason, total }: any) {
+  const rows = [
+    ["KHYC", reason.KHYC || 0, COLORS.blue],
+    ["Nợ cước", reason["Nợ cước"] || 0, COLORS.orange],
+    ["KHYC+NC", reason["KHYC+NC"] || 0, COLORS.purple],
   ];
 
   return (
-    <div
-      className={`px-6 ${
-        noBorder ? "" : "xl:border-r xl:border-slate-200"
-      }`}
-    >
-      <div className="flex justify-between gap-4">
-        <div>
-          <div className="font-black text-slate-900">{title}</div>
+    <table className="w-full text-sm">
+      <thead>
+        <tr>
+          <Th>Lý do tạm ngưng</Th>
+          <Th>Số lượng</Th>
+          <Th>Tỷ lệ</Th>
+          <Th>Biểu đồ</Th>
+        </tr>
+      </thead>
 
-          <div className="text-3xl font-black mt-4" style={{ color }}>
-            {rate}%
-          </div>
-
-          <div className="text-slate-500 mt-2">
-            {num(done)} / {num(total)} thuê bao
-          </div>
-        </div>
-
-        <div className="text-green-600 bg-green-50 h-fit px-3 py-1 rounded-lg text-sm font-bold">
-          ↑ KPI
-        </div>
-      </div>
-
-      <div className="h-[180px] mt-2 relative">
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
-            <Pie
-              data={data}
-              innerRadius={54}
-              outerRadius={74}
-              dataKey="value"
-              startAngle={90}
-              endAngle={-270}
-            >
-              <Cell fill={color} />
-              <Cell fill={COLOR.gray} />
-            </Pie>
-            <Tooltip />
-          </PieChart>
-        </ResponsiveContainer>
-
-        <div className="absolute inset-0 flex items-center justify-center text-xl font-black pointer-events-none">
-          {rate}%
-        </div>
-      </div>
-
-      <div className="text-sm text-slate-600 space-y-1">
-        <div>
-          {doneLabel}: <b>{num(done)}</b>
-        </div>
-        <div>
-          {remainLabel}: <b>{num(remain)}</b>
-        </div>
-      </div>
-    </div>
+      <tbody>
+        {rows.map(([label, value, color]: any) => (
+          <tr key={label} className="border-t">
+            <Td bold>{label}</Td>
+            <Td>{num(value)}</Td>
+            <Td>{pct(value, total)}%</Td>
+            <td className="p-3 w-[45%]">
+              <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full"
+                  style={{
+                    width: `${pct(value, total)}%`,
+                    background: color,
+                  }}
+                />
+              </div>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
+}
+
+function StatsTable({ data }: any) {
+  return (
+    <table className="w-full text-sm">
+      <thead>
+        <tr>
+          <Th>VTKV</Th>
+          <Th>Tạm ngưng</Th>
+          <Th>Đã TX</Th>
+          <Th>Chưa TX</Th>
+          <Th>Khôi phục</Th>
+          <Th>Đóng việc</Th>
+          <Th>%TX</Th>
+          <Th>%KP</Th>
+        </tr>
+      </thead>
+
+      <tbody>
+        {data.map((r: any) => (
+          <tr key={r.name} className="border-t">
+            <Td bold>{r.name}</Td>
+            <Td>{num(r.total)}</Td>
+            <Td>{num(r.contacted)}</Td>
+            <Td>{num(r.notContacted)}</Td>
+            <Td>{num(r.recovered)}</Td>
+            <Td>{num(r.closed)}</Td>
+            <Td>{r.contactRate}%</Td>
+            <Td>{r.recoveryRate}%</Td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function buildStats(data: Row[]) {
+  const total = data.length;
+
+  const contacted = data.filter((r) => up(r.latest_contact_status) === "CONTACTED").length;
+  const recovered = data.filter((r) => up(r.latest_recovery_result) === "RECOVERED").length;
+  const closed = data.filter((r) => up(r.latest_workflow_status) === "COMPLETED").length;
+  const failed = data.filter((r) => ["FAILED", "NOT_RECOVERED"].includes(up(r.latest_recovery_result))).length;
+  const over7 = data.filter((r) => Number(r.days_suspend || 0) > 7).length;
+
+  return {
+    total,
+    contacted,
+    notContacted: total - contacted,
+    recovered,
+    closed,
+    failed,
+    pending: total - recovered - failed,
+    over7,
+    contactRate: pct(contacted, total),
+    recoveryRate: pct(recovered, total),
+  };
+}
+
+function reasonCount(data: Row[]) {
+  const r: any = {
+    KHYC: 0,
+    "Nợ cước": 0,
+    "KHYC+NC": 0,
+  };
+
+  data.forEach((x) => {
+    const reason = String(x.suspend_reason || "").trim();
+    if (reason === "KHYC") r.KHYC++;
+    else if (reason === "Nợ cước") r["Nợ cước"]++;
+    else if (reason === "KHYC+NC") r["KHYC+NC"]++;
+  });
+
+  return r;
+}
+
+function groupByVTKV(data: Row[]) {
+  const map = new Map<string, Row[]>();
+
+  data.forEach((r) => {
+    const key = r.vtkv || "Không xác định";
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)?.push(r);
+  });
+
+  return Array.from(map.entries())
+    .map(([name, arr]) => ({
+      name,
+      ...buildStats(arr),
+    }))
+    .sort((a, b) => b.total - a.total);
 }
 
 function Nav({ label, active, onClick }: any) {
@@ -528,23 +579,23 @@ function Summary({ label, value }: any) {
   );
 }
 
-function topCount(rows: Row[], field: keyof Row, total: number) {
-  const map = new Map<string, number>();
+function getToday() {
+  return new Date().toISOString().slice(0, 10);
+}
 
-  rows.forEach((r) => {
-    const name = String(r[field] || "").trim();
-    if (!name) return;
+function getYesterday() {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
 
-    map.set(name, (map.get(name) || 0) + 1);
-  });
+function dateOnly(v?: string) {
+  return String(v || "").slice(0, 10);
+}
 
-  return Array.from(map.entries())
-    .map(([name, value]) => ({
-      name,
-      value,
-      rate: pct(value, total),
-    }))
-    .sort((a, b) => b.value - a.value);
+function formatDateVi(v: string) {
+  const [y, m, d] = v.split("-");
+  return `${d}/${m}/${y}`;
 }
 
 function pct(a: number, b: number) {
@@ -559,10 +610,15 @@ function num(v: any) {
   return Number(v || 0).toLocaleString("vi-VN");
 }
 
+function numOrText(v: any) {
+  if (typeof v === "string" && v.includes("%")) return v;
+  return num(v);
+}
+
 function Th({ children }: any) {
   return <th className="text-left p-3 font-bold text-slate-600">{children}</th>;
 }
 
-function Td({ children }: any) {
-  return <td className="p-3 whitespace-nowrap">{children}</td>;
+function Td({ children, bold }: any) {
+  return <td className={`p-3 whitespace-nowrap ${bold ? "font-bold" : ""}`}>{children}</td>;
 }
