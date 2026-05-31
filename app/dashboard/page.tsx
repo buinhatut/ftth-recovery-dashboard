@@ -44,7 +44,6 @@ const COLORS = {
   teal: "#0f766e",
 };
 
-const PAGE_SIZE = 30;
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -56,7 +55,6 @@ export default function DashboardPage() {
   const [selectedMonth, setSelectedMonth] = useState("ALL");
   const [selectedVTKV, setSelectedVTKV] = useState("ALL");
   const [loading, setLoading] = useState(true);
-  const [cnkdPage, setCnkdPage] = useState(1);
   const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
@@ -78,9 +76,6 @@ export default function DashboardPage() {
     loadData(token);
   }, [router]);
 
-  useEffect(() => {
-    setCnkdPage(1);
-  }, [selectedMonth, selectedVTKV]);
 
   async function loadData(token: string) {
     setLoading(true);
@@ -186,15 +181,6 @@ export default function DashboardPage() {
   }, [viewRows, activeMonth]);
 
   const byVTKV = useMemo(() => groupBy(viewRows, "vtkv"), [viewRows]);
-  const byCNKD = useMemo(() => groupBy(viewRows, "cnkd"), [viewRows]);
-
-  const cnkdTotalPages = Math.max(1, Math.ceil(byCNKD.length / PAGE_SIZE));
-
-  const cnkdPageData = useMemo(() => {
-    const start = (cnkdPage - 1) * PAGE_SIZE;
-    return byCNKD.slice(start, start + PAGE_SIZE);
-  }, [byCNKD, cnkdPage]);
-
   const vtkvSuspendChart = useMemo(() => {
     return byVTKV
       .map((x) => ({ name: x.name, value: x.total }))
@@ -646,42 +632,6 @@ export default function DashboardPage() {
 
               </div>
 
-              {role !== "CNKD" && (
-                <section className="bg-white rounded-2xl shadow p-6 mt-6">
-                  <h2 className="font-black text-xl mb-5">Thống kê theo VTKV</h2>
-                  <StatsTable data={byVTKV} firstCol="VTKV" />
-                </section>
-              )}
-
-              <section className="bg-white rounded-2xl shadow p-6 mt-6">
-                <div className="flex justify-between items-center mb-5">
-                  <h2 className="font-black text-xl">Thống kê theo CNKD</h2>
-
-                  <div className="flex items-center gap-3 text-sm">
-                    <button
-                      onClick={() => setCnkdPage((p) => Math.max(1, p - 1))}
-                      disabled={cnkdPage <= 1}
-                      className="px-4 py-2 rounded-lg bg-slate-100 font-bold disabled:opacity-40"
-                    >
-                      Previous
-                    </button>
-
-                    <span>
-                      Trang <b>{cnkdPage}</b> / <b>{cnkdTotalPages}</b>
-                    </span>
-
-                    <button
-                      onClick={() => setCnkdPage((p) => Math.min(cnkdTotalPages, p + 1))}
-                      disabled={cnkdPage >= cnkdTotalPages}
-                      className="px-4 py-2 rounded-lg bg-slate-100 font-bold disabled:opacity-40"
-                    >
-                      Next
-                    </button>
-                  </div>
-                </div>
-
-                <StatsTable data={cnkdPageData} firstCol="CNKD" />
-              </section>
             </div>
           )}
         </div>
@@ -807,46 +757,6 @@ function ProgressLine({ label, value, total, color }: any) {
           style={{ width: `${pct(value, total)}%`, background: color }}
         />
       </div>
-    </div>
-  );
-}
-
-function StatsTable({ data, firstCol }: any) {
-  return (
-    <div className="overflow-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr>
-            <Th>{firstCol}</Th>
-            <Th>Tạm ngưng</Th>
-            <Th>Đã TX</Th>
-            <Th>Chưa TX</Th>
-            <Th>Khôi phục</Th>
-            <Th>Đóng việc</Th>
-            <Th>%TX</Th>
-            <Th>%KP</Th>
-            <Th>{">7 ngày"}</Th>
-            <Th>{">15 ngày"}</Th>
-          </tr>
-        </thead>
-
-        <tbody>
-          {data.map((r: any) => (
-            <tr key={r.name} className="border-t">
-              <Td bold>{r.name}</Td>
-              <Td>{num(r.total)}</Td>
-              <Td>{num(r.contacted)}</Td>
-              <Td>{num(r.notContacted)}</Td>
-              <Td>{num(r.recovered)}</Td>
-              <Td>{num(r.closed)}</Td>
-              <Td>{r.contactRate}%</Td>
-              <Td>{r.recoveryRate}%</Td>
-              <Td>{num(r.over7)}</Td>
-              <Td>{num(r.over15)}</Td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }
@@ -1018,18 +928,3 @@ function numOrText(v: any) {
   return num(v);
 }
 
-function Th({ children }: any) {
-  return (
-    <th className="text-left p-3 font-bold text-slate-600 whitespace-nowrap">
-      {children}
-    </th>
-  );
-}
-
-function Td({ children, bold }: any) {
-  return (
-    <td className={`p-3 whitespace-nowrap ${bold ? "font-bold" : ""}`}>
-      {children}
-    </td>
-  );
-}
