@@ -1,42 +1,144 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import Papa from "papaparse";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL!;
+type ImportRow = {
+  vtkv: string;
+  cnkd: string;
+  account: string;
+  phone: string;
+  suspend_date: string;
+  suspend_reason: string;
+};
 
 export default function ImportPage() {
-  const [rows, setRows] = useState<any[]>([]);
+  const router = useRouter();
+
+  const [user, setUser] = useState<any>(null);
+  const [rows, setRows] = useState<ImportRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    const token = localStorage.getItem("ftth_token");
+    const userText = localStorage.getItem("ftth_user");
+
+    if (!token || !userText) {
+      router.push("/login");
+      return;
+    }
+
+    const u = JSON.parse(userText);
+    setUser(u);
+
+    if (String(u.role || "").toUpperCase() !== "CN") {
+      setMessage("Chỉ tài khoản CN/Admin được quyền import dữ liệu");
+    }
+  }, [router]);
+
+  function normalizeReason(v: string) {
+    const s = String(v || "").trim();
+    const x = s.toLowerCase().replace(/\s+/g, "");
+
+    if (x === "khyc") return "KHYC";
+    if (x === "nợcước" || x === "nocuoc") return "Nợ cước";
+    if (x === "khyc+nc" || x === "khycnc" || x === "khyc+nợcước") {
+      return "KHYC+NC";
+    }
+
+    return s;
+  }
 
   function handleFile(file: File) {
+    setResult(null);
+    setMessage("");
+
     Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
       complete: (res) => {
-        setRows(res.data as any[]);
+        const data = (res.data as any[]).map((r) => ({
+          vtkv: String(r.vtkv || "").trim(),
+          cnkd: String(r.cnkd || "").trim(),
+          account: String(r.account || "").trim(),
+          phone: String(r.phone || "").trim(),
+          suspend_date: String(r.suspend_date || "").trim(),
+          suspend_reason: normalizeReason(r.suspend_reason || ""),
+        }));
+
+        setRows(data);
+      },
+      error: (err) => {
+        setMessage("Lỗi đọc file CSV: " + err.message);
       },
     });
+  }
+
+  function downloadTemplate() {
+    const csv = [
+      "vtkv,cnkd,account,phone,suspend_date,suspend_reason",
+      "TTI,DUCHV_HNI_CNKD,h004_gftth_001,,01-06-2026,KHYC",
+      "TTI,DUCHV_HNI_CNKD,h004_gftth_002,,01-06-2026,Nợ cước",
+      "TTI,DUCHV_HNI_CNKD,h004_gftth_003,,01-06-2026,KHYC+NC",
+    ].join("\n");
+
+    const blob = new Blob(["\ufeff" + csv], {
+      type: "text/csv;charset=utf-8;",
+    });
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+
+    a.href = url;
+    a.download = "template_import_subscribers.csv";
+    a.click();
+
+    URL.revokeObjectURL(url);
   }
 
   async function doImport() {
     const token = localStorage.getItem("ftth_token");
 
     if (!token) {
-      alert("Hết phiên đăng nhập");
+      router.push("/login");
+      return;
+    }
+
+    if (String(user?.role || "").toUpperCase() !== "CN") {
+      setMessage("Chỉ tài khoản CN/Admin được quyền import dữ liệu");
       return;
     }
 
     if (rows.length === 0) {
-      alert("Chưa có dữ liệu");
+      setMessage("Chưa có dữ liệu import");
+      return;
+    }
+
+    const invalid = rows.filter(
+      (r) =>
+        !r.vtkv ||
+        !r.cnkd ||
+        !r.account ||
+        !r.suspend_date ||
+        !["KHYC", "Nợ cước", "KHYC+NC"].includes(r.suspend_reason)
+    );
+
+    if (invalid.length > 0) {
+      setMessage(
+        `Có ${invalid.length} dòng thiếu dữ liệu hoặc sai lý do tạm ngưng`
+      );
       return;
     }
 
     setLoading(true);
+    setMessage("");
+    setResult(null);
 
     try {
-      const res = await fetch(API_URL, {
+      const res = await fetch("/api/proxy", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -53,33 +155,40 @@ export default function ImportPage() {
       setResult(data);
 
       if (data.status === "OK") {
-        alert(
-          `Import thành công ${data.success} thuê bao`
-        );
+        setMessage(`Import hoàn tất: ${data.success || 0} thuê bao`);
       } else {
-        alert(data.message);
+        setMessage(data.message || "Import không thành công");
       }
     } catch (err: any) {
-      alert(err.message);
+      setMessage("Lỗi import: " + err.message);
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   }
 
   return (
-    <main className="p-6">
+    <main className="min-h-screen bg-slate-100 p-6">
       <div className="bg-white rounded-2xl shadow p-6">
-
-        <h1 className="text-2xl font-black mb-4">
-          Import thuê bao tạm ngưng
-        </h1>
-
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4">
-          <div className="font-bold mb-2">
-            Cấu trúc file CSV
+        <div className="flex justify-between items-center gap-4 mb-6">
+          <div>
+            <h1 className="text-3xl font-black">Import thuê bao tạm ngưng</h1>
+            <p className="text-slate-500 mt-1">
+              Chỉ tài khoản CN/Admin được import dữ liệu.
+            </p>
           </div>
 
-          <pre className="text-sm">
+          <button
+            onClick={() => router.push("/dashboard")}
+            className="bg-black text-white px-5 py-3 rounded-xl font-bold"
+          >
+            Dashboard
+          </button>
+        </div>
+
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-5">
+          <div className="font-bold mb-2">Cấu trúc file CSV</div>
+
+          <pre className="text-sm whitespace-pre-wrap">
 {`vtkv,cnkd,account,phone,suspend_date,suspend_reason
 
 TTI,DUCHV_HNI_CNKD,h004_gftth_001,,01-06-2026,KHYC
@@ -95,61 +204,99 @@ TTI,DUCHV_HNI_CNKD,h004_gftth_003,,01-06-2026,KHYC+NC`}
           </div>
         </div>
 
-        <input
-          type="file"
-          accept=".csv"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) {
-              handleFile(file);
-            }
-          }}
-        />
+        <div className="flex flex-wrap gap-3 items-center mb-5">
+          <input
+            type="file"
+            accept=".csv"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleFile(file);
+            }}
+            className="border rounded-xl px-4 py-3 bg-white"
+          />
 
-        <div className="mt-4">
+          <button
+            onClick={downloadTemplate}
+            className="bg-slate-700 text-white px-5 py-3 rounded-xl font-bold"
+          >
+            Tải file mẫu
+          </button>
+
           <button
             onClick={doImport}
-            disabled={loading}
-            className="bg-green-600 text-white px-6 py-3 rounded-xl font-bold"
+            disabled={loading || rows.length === 0}
+            className="bg-green-600 text-white px-6 py-3 rounded-xl font-bold disabled:bg-gray-400"
           >
             {loading ? "Đang import..." : "Import dữ liệu"}
           </button>
         </div>
 
-        <div className="mt-6">
-          <div className="font-bold mb-2">
-            Preview ({rows.length} records)
+        {message && (
+          <div
+            className={`rounded-xl p-4 mb-5 ${
+              result?.status === "OK"
+                ? "bg-green-50 text-green-700"
+                : "bg-yellow-50 text-yellow-800"
+            }`}
+          >
+            {message}
           </div>
+        )}
 
-          <div className="overflow-auto border rounded-xl">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-100">
+        <div className="mb-3 font-bold">
+          Preview ({rows.length} records)
+        </div>
+
+        <div className="overflow-auto border rounded-xl bg-white">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-100">
+              <tr>
+                <th className="p-3 text-left">STT</th>
+                <th className="p-3 text-left">VTKV</th>
+                <th className="p-3 text-left">CNKD</th>
+                <th className="p-3 text-left">Account</th>
+                <th className="p-3 text-left">Phone</th>
+                <th className="p-3 text-left">Ngày TN</th>
+                <th className="p-3 text-left">Lý do TN</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {rows.length === 0 ? (
                 <tr>
-                  <th className="p-2">VTKV</th>
-                  <th className="p-2">CNKD</th>
-                  <th className="p-2">Account</th>
-                  <th className="p-2">Phone</th>
-                  <th className="p-2">Ngày TN</th>
-                  <th className="p-2">Lý do TN</th>
+                  <td colSpan={7} className="p-6 text-center text-slate-500">
+                    Chưa có dữ liệu preview
+                  </td>
                 </tr>
-              </thead>
-
-              <tbody>
-                {rows.slice(0, 20).map((r, i) => (
+              ) : (
+                rows.slice(0, 100).map((r, i) => (
                   <tr key={i} className="border-t">
-                    <td className="p-2">{r.vtkv}</td>
-                    <td className="p-2">{r.cnkd}</td>
-                    <td className="p-2">{r.account}</td>
-                    <td className="p-2">{r.phone}</td>
-                    <td className="p-2">{r.suspend_date}</td>
-                    <td className="p-2">
-                      {r.suspend_reason}
+                    <td className="p-3">{i + 1}</td>
+                    <td className="p-3 font-bold">{r.vtkv}</td>
+                    <td className="p-3">{r.cnkd}</td>
+                    <td className="p-3 font-bold">{r.account}</td>
+                    <td className="p-3">{r.phone}</td>
+                    <td className="p-3">{r.suspend_date}</td>
+                    <td className="p-3">
+                      <span
+                        className={`px-3 py-1 rounded-full text-xs font-bold ${
+                          r.suspend_reason === "KHYC"
+                            ? "bg-blue-50 text-blue-700"
+                            : r.suspend_reason === "Nợ cước"
+                            ? "bg-orange-50 text-orange-700"
+                            : r.suspend_reason === "KHYC+NC"
+                            ? "bg-purple-50 text-purple-700"
+                            : "bg-red-50 text-red-700"
+                        }`}
+                      >
+                        {r.suspend_reason || "Thiếu lý do"}
+                      </span>
                     </td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
 
         {result && (
@@ -168,6 +315,20 @@ TTI,DUCHV_HNI_CNKD,h004_gftth_003,,01-06-2026,KHYC+NC`}
               Lỗi:
               <b> {result.error_count || 0}</b>
             </div>
+
+            {Array.isArray(result.errors) && result.errors.length > 0 && (
+              <div className="mt-3">
+                <div className="font-bold mb-2">Chi tiết lỗi</div>
+
+                <ul className="list-disc pl-6 text-sm text-red-700">
+                  {result.errors.slice(0, 20).map((e: any, i: number) => (
+                    <li key={i}>
+                      Dòng {e.row}: {e.account} - {e.message}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         )}
       </div>
