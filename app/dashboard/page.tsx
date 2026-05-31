@@ -241,12 +241,39 @@ export default function DashboardPage() {
     try {
       await new Promise((r) => setTimeout(r, 300));
 
-      const canvas = await html2canvas(dashboardRef.current, {
-        scale: 2,
-        backgroundColor: "#f8fafc",
-        useCORS: true,
-        logging: false,
-      });
+    const canvas = await html2canvas(dashboardRef.current, {
+  scale: 2,
+  backgroundColor: "#ffffff",
+  useCORS: true,
+  logging: false,
+  ignoreElements: (el) => {
+    return el.classList?.contains("no-export");
+  },
+  onclone: (doc) => {
+    const root = doc.querySelector("[data-export-root]") as HTMLElement | null;
+
+    if (root) {
+      root.style.backgroundColor = "#ffffff";
+      root.style.color = "#0f172a";
+    }
+
+    doc.querySelectorAll("*").forEach((el: any) => {
+      const style = window.getComputedStyle(el);
+
+      if (style.backgroundColor.includes("lab") || style.backgroundColor.includes("oklch")) {
+        el.style.backgroundColor = "#ffffff";
+      }
+
+      if (style.color.includes("lab") || style.color.includes("oklch")) {
+        el.style.color = "#0f172a";
+      }
+
+      if (style.borderColor.includes("lab") || style.borderColor.includes("oklch")) {
+        el.style.borderColor = "#e5e7eb";
+      }
+    });
+  },
+});
 
       const filename = `ftth-recovery-${activeMonth}-${selectedVTKV === "ALL" ? "ALL" : selectedVTKV}.png`;
 
@@ -359,7 +386,7 @@ export default function DashboardPage() {
           {loading ? (
             <div className="bg-white rounded-2xl p-8 shadow">Đang tải dữ liệu...</div>
           ) : (
-            <div ref={dashboardRef} className="bg-[#f8fafc] p-1">
+            <div ref={dashboardRef} data-export-root className="bg-white p-4">
               <div className="mb-5">
                 <h2 className="text-2xl font-black">
                   Báo cáo FTTH Recovery - {selectedVTKV === "ALL" ? "Toàn HNI" : selectedVTKV}
