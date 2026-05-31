@@ -23,7 +23,6 @@ type Row = {
   phone: string;
   suspend_date?: string;
   suspend_month?: string;
-  days_suspend?: number | string;
   latest_contact_status?: string;
   latest_reason_l1_name?: string;
   latest_reason_l2_name?: string;
@@ -31,7 +30,7 @@ type Row = {
   latest_workflow_status?: string;
 };
 
-const C = {
+const COLOR = {
   blue: "#2563eb",
   green: "#16a34a",
   orange: "#f97316",
@@ -126,25 +125,29 @@ export default function DashboardPage() {
       (r) => up(r.latest_recovery_result) === "RECOVERED"
     ).length;
 
-    const pending = viewRows.filter((r) =>
-      ["PENDING", "FOLLOW_UP", "PROCESSING", ""].includes(
-        up(r.latest_recovery_result || r.latest_workflow_status)
-      )
-    ).length;
-
     const closed = viewRows.filter(
       (r) => up(r.latest_workflow_status) === "COMPLETED"
     ).length;
 
+    const failed = viewRows.filter((r) =>
+      ["FAILED", "NOT_RECOVERED"].includes(up(r.latest_recovery_result))
+    ).length;
+
+    const processing = total - recovered - failed;
+
     return {
       total,
       contacted,
+      notContacted: total - contacted,
       recovered,
-      pending,
+      notRecovered: total - recovered,
+      processing,
+      processed: total - processing,
       closed,
+      notClosed: total - closed,
       contactRate: pct(contacted, total),
       recoveryRate: pct(recovered, total),
-      pendingRate: pct(pending, total),
+      processingRate: pct(processing, total),
       closeRate: pct(closed, total),
     };
   }, [viewRows]);
@@ -153,12 +156,15 @@ export default function DashboardPage() {
     const map = new Map<string, any>();
 
     viewRows.forEach((r) => {
-      const d = String(r.suspend_date || "").slice(0, 10);
-      if (!d) return;
+      const raw = String(r.suspend_date || "").slice(0, 10);
+      if (!raw) return;
 
-      if (!map.has(d)) {
-        map.set(d, {
-          date: d.slice(5),
+      const label = raw.slice(8, 10);
+
+      if (!map.has(raw)) {
+        map.set(raw, {
+          raw,
+          date: label,
           suspend: 0,
           contacted: 0,
           recovered: 0,
@@ -166,15 +172,16 @@ export default function DashboardPage() {
         });
       }
 
-      const x = map.get(d);
-      x.suspend += 1;
-      if (up(r.latest_contact_status) === "CONTACTED") x.contacted += 1;
-      if (up(r.latest_recovery_result) === "RECOVERED") x.recovered += 1;
-      if (up(r.latest_workflow_status) === "COMPLETED") x.closed += 1;
+      const item = map.get(raw);
+      item.suspend += 1;
+
+      if (up(r.latest_contact_status) === "CONTACTED") item.contacted += 1;
+      if (up(r.latest_recovery_result) === "RECOVERED") item.recovered += 1;
+      if (up(r.latest_workflow_status) === "COMPLETED") item.closed += 1;
     });
 
     return Array.from(map.values()).sort((a, b) =>
-      String(a.date).localeCompare(String(b.date))
+      String(a.raw).localeCompare(String(b.raw))
     );
   }, [viewRows]);
 
@@ -195,8 +202,8 @@ export default function DashboardPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f8fafc] flex">
-      <aside className="w-[250px] bg-white border-r min-h-screen p-5 hidden lg:block">
+    <main className="min-h-screen bg-[#f8fafc] flex text-slate-900">
+      <aside className="w-[250px] bg-white border-r border-slate-200 min-h-screen p-5 hidden lg:block relative">
         <div className="text-xl font-black text-blue-600 mb-8">
           FTTH Recovery
         </div>
@@ -205,14 +212,15 @@ export default function DashboardPage() {
         <Nav label="Danh sách thuê bao" onClick={() => router.push("/subscribers")} />
         <Nav label="Cập nhật lịch sử" onClick={() => router.push("/subscribers")} />
         <Nav label="Import Excel" onClick={() => router.push("/import")} />
-        <Nav label="Nhật ký hệ thống" onClick={() => {}} />
-        <Nav label="Quản lý người dùng" onClick={() => {}} />
-        <Nav label="Cấu hình" onClick={() => {}} />
-        <Nav label="Hướng dẫn" onClick={() => {}} />
+        <Nav label="Nhật ký hệ thống" />
+        <Nav label="Quản lý người dùng" />
+        <Nav label="Cấu hình" />
+        <Nav label="Hướng dẫn" />
 
-        <div className="absolute bottom-6 left-5 text-sm">
-          <div className="font-bold">{user?.full_name}</div>
-          <div className="text-gray-500">{user?.scope_code}</div>
+        <div className="absolute bottom-6 left-5 right-5 text-sm">
+          <div className="font-black">{user?.full_name || "User"}</div>
+          <div className="text-slate-500">{user?.scope_code || ""}</div>
+
           <button onClick={logout} className="text-red-600 font-bold mt-4">
             Đăng xuất
           </button>
@@ -220,13 +228,13 @@ export default function DashboardPage() {
       </aside>
 
       <section className="flex-1">
-        <header className="h-[64px] bg-white border-b flex items-center justify-between px-6">
+        <header className="h-[64px] bg-white border-b border-slate-200 flex items-center justify-between px-6 sticky top-0 z-10">
           <div className="flex items-center gap-4">
-            <button className="text-2xl">☰</button>
+            <button className="text-2xl leading-none">☰</button>
             <h1 className="font-black text-xl">Dashboard KPI</h1>
           </div>
 
-          <div className="flex gap-3">
+          <div className="flex items-center gap-3">
             <select
               value={selectedMonth}
               onChange={(e) => setSelectedMonth(e.target.value)}
@@ -264,13 +272,13 @@ export default function DashboardPage() {
               <section className="bg-white rounded-2xl shadow p-6 mb-6">
                 <h2 className="font-black text-xl mb-6">Dashboard KPI</h2>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-0 divide-x">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4">
                   <DonutCard
                     title="1. Tỷ lệ tiếp xúc"
                     rate={stats.contactRate}
                     done={stats.contacted}
                     total={stats.total}
-                    color={C.blue}
+                    color={COLOR.blue}
                     doneLabel="Đã tiếp xúc"
                     remainLabel="Chưa tiếp xúc"
                   />
@@ -280,17 +288,17 @@ export default function DashboardPage() {
                     rate={stats.recoveryRate}
                     done={stats.recovered}
                     total={stats.total}
-                    color={C.green}
+                    color={COLOR.green}
                     doneLabel="Đã khôi phục"
                     remainLabel="Chưa khôi phục"
                   />
 
                   <DonutCard
                     title="3. Tỷ lệ đang xử lý"
-                    rate={stats.pendingRate}
-                    done={stats.pending}
+                    rate={stats.processingRate}
+                    done={stats.processing}
                     total={stats.total}
-                    color={C.orange}
+                    color={COLOR.orange}
                     doneLabel="Đang xử lý"
                     remainLabel="Đã xử lý"
                   />
@@ -300,9 +308,10 @@ export default function DashboardPage() {
                     rate={stats.closeRate}
                     done={stats.closed}
                     total={stats.total}
-                    color={C.purple}
+                    color={COLOR.purple}
                     doneLabel="Đã đóng việc"
                     remainLabel="Chưa đóng việc"
+                    noBorder
                   />
                 </div>
               </section>
@@ -310,7 +319,8 @@ export default function DashboardPage() {
               <section className="bg-white rounded-2xl shadow p-6 mb-6">
                 <div className="flex justify-between items-center mb-5">
                   <h2 className="font-black text-xl">Xu hướng phục hồi theo ngày</h2>
-                  <div className="text-sm text-gray-500">
+
+                  <div className="text-sm text-slate-500">
                     Tạm ngưng / Tiếp xúc / Khôi phục / Đóng việc
                   </div>
                 </div>
@@ -323,10 +333,38 @@ export default function DashboardPage() {
                       <YAxis allowDecimals={false} />
                       <Tooltip />
                       <Legend />
-                      <Line dataKey="suspend" name="Tạm ngưng" stroke={C.blue} strokeWidth={3} />
-                      <Line dataKey="contacted" name="Tiếp xúc" stroke={C.green} strokeWidth={3} />
-                      <Line dataKey="recovered" name="Khôi phục" stroke={C.orange} strokeWidth={3} />
-                      <Line dataKey="closed" name="Đóng việc" stroke={C.purple} strokeWidth={3} />
+                      <Line
+                        type="monotone"
+                        dataKey="suspend"
+                        name="Tạm ngưng"
+                        stroke={COLOR.blue}
+                        strokeWidth={3}
+                        dot={{ r: 3 }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="contacted"
+                        name="Tiếp xúc"
+                        stroke={COLOR.green}
+                        strokeWidth={3}
+                        dot={{ r: 3 }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="recovered"
+                        name="Khôi phục"
+                        stroke={COLOR.orange}
+                        strokeWidth={3}
+                        dot={{ r: 3 }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="closed"
+                        name="Đóng việc"
+                        stroke={COLOR.purple}
+                        strokeWidth={3}
+                        dot={{ r: 3 }}
+                      />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
@@ -349,29 +387,39 @@ export default function DashboardPage() {
                         <Th>Số lượng</Th>
                       </tr>
                     </thead>
+
                     <tbody>
-                      {topReason1.slice(0, 5).map((r, i) => (
-                        <tr key={r.name} className="border-t">
-                          <Td>{i + 1}</Td>
-                          <Td>{r.name}</Td>
-                          <Td>{num(r.value)}</Td>
-                          <Td>{r.rate}%</Td>
-                          <Td>{topReason2[i]?.name || ""}</Td>
-                          <Td>{topReason2[i]?.value || ""}</Td>
+                      {topReason1.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="p-4 text-slate-500">
+                            Chưa có dữ liệu nguyên nhân
+                          </td>
                         </tr>
-                      ))}
+                      ) : (
+                        topReason1.slice(0, 5).map((r, i) => (
+                          <tr key={r.name} className="border-t">
+                            <Td>{i + 1}</Td>
+                            <Td>{r.name}</Td>
+                            <Td>{num(r.value)}</Td>
+                            <Td>{r.rate}%</Td>
+                            <Td>{topReason2[i]?.name || ""}</Td>
+                            <Td>{topReason2[i]?.value ? num(topReason2[i].value) : ""}</Td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
                 </section>
 
                 <section className="bg-white rounded-2xl shadow p-6">
                   <h2 className="font-black text-xl mb-5">Tổng quan tháng</h2>
+
                   <Summary label="Tổng thuê bao tạm ngưng" value={stats.total} />
                   <Summary label="Đã tiếp xúc" value={stats.contacted} />
                   <Summary label="Đã khôi phục" value={stats.recovered} />
-                  <Summary label="Đang xử lý" value={stats.pending} />
+                  <Summary label="Đang xử lý" value={stats.processing} />
                   <Summary label="Đã đóng việc" value={stats.closed} />
-                  <Summary label="Chưa tiếp xúc" value={stats.total - stats.contacted} />
+                  <Summary label="Chưa tiếp xúc" value={stats.notContacted} />
                 </section>
               </div>
             </>
@@ -390,6 +438,7 @@ function DonutCard({
   color,
   doneLabel,
   remainLabel,
+  noBorder,
 }: any) {
   const remain = Math.max(total - done, 0);
 
@@ -399,23 +448,30 @@ function DonutCard({
   ];
 
   return (
-    <div className="px-6">
-      <div className="flex justify-between">
+    <div
+      className={`px-6 ${
+        noBorder ? "" : "xl:border-r xl:border-slate-200"
+      }`}
+    >
+      <div className="flex justify-between gap-4">
         <div>
-          <div className="font-black">{title}</div>
+          <div className="font-black text-slate-900">{title}</div>
+
           <div className="text-3xl font-black mt-4" style={{ color }}>
             {rate}%
           </div>
-          <div className="text-gray-500 mt-2">
+
+          <div className="text-slate-500 mt-2">
             {num(done)} / {num(total)} thuê bao
           </div>
         </div>
+
         <div className="text-green-600 bg-green-50 h-fit px-3 py-1 rounded-lg text-sm font-bold">
           ↑ KPI
         </div>
       </div>
 
-      <div className="h-[180px] mt-2">
+      <div className="h-[180px] mt-2 relative">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
             <Pie
@@ -427,14 +483,18 @@ function DonutCard({
               endAngle={-270}
             >
               <Cell fill={color} />
-              <Cell fill={C.gray} />
+              <Cell fill={COLOR.gray} />
             </Pie>
             <Tooltip />
           </PieChart>
         </ResponsiveContainer>
+
+        <div className="absolute inset-0 flex items-center justify-center text-xl font-black pointer-events-none">
+          {rate}%
+        </div>
       </div>
 
-      <div className="text-sm text-gray-600 space-y-1">
+      <div className="text-sm text-slate-600 space-y-1">
         <div>
           {doneLabel}: <b>{num(done)}</b>
         </div>
@@ -462,7 +522,7 @@ function Nav({ label, active, onClick }: any) {
 function Summary({ label, value }: any) {
   return (
     <div className="flex justify-between py-3 border-b">
-      <span className="text-gray-600">{label}</span>
+      <span className="text-slate-600">{label}</span>
       <b>{num(value)}</b>
     </div>
   );
@@ -474,6 +534,7 @@ function topCount(rows: Row[], field: keyof Row, total: number) {
   rows.forEach((r) => {
     const name = String(r[field] || "").trim();
     if (!name) return;
+
     map.set(name, (map.get(name) || 0) + 1);
   });
 
@@ -499,7 +560,7 @@ function num(v: any) {
 }
 
 function Th({ children }: any) {
-  return <th className="text-left p-3 font-bold text-gray-600">{children}</th>;
+  return <th className="text-left p-3 font-bold text-slate-600">{children}</th>;
 }
 
 function Td({ children }: any) {
