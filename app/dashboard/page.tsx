@@ -41,9 +41,9 @@ const COLORS = {
   red: "#dc2626",
   purple: "#7c3aed",
   teal: "#0f766e",
-  slate: "#475569",
-  gray: "#e5e7eb",
 };
+
+const PAGE_SIZE = 30;
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -53,6 +53,7 @@ export default function DashboardPage() {
   const [selectedMonth, setSelectedMonth] = useState("ALL");
   const [selectedVTKV, setSelectedVTKV] = useState("ALL");
   const [loading, setLoading] = useState(true);
+  const [cnkdPage, setCnkdPage] = useState(1);
 
   useEffect(() => {
     const token = localStorage.getItem("ftth_token");
@@ -72,6 +73,10 @@ export default function DashboardPage() {
 
     loadData(token);
   }, [router]);
+
+  useEffect(() => {
+    setCnkdPage(1);
+  }, [selectedMonth, selectedVTKV]);
 
   async function loadData(token: string) {
     setLoading(true);
@@ -125,9 +130,7 @@ export default function DashboardPage() {
   const yesterday = getYesterday();
 
   const todayRows = viewRows.filter((r) => dateOnly(r.suspend_date) === today);
-  const yesterdayRows = viewRows.filter(
-    (r) => dateOnly(r.suspend_date) === yesterday
-  );
+  const yesterdayRows = viewRows.filter((r) => dateOnly(r.suspend_date) === yesterday);
 
   const monthStats = useMemo(() => buildStats(viewRows), [viewRows]);
   const todayStats = useMemo(() => buildStats(todayRows), [todayRows]);
@@ -135,10 +138,7 @@ export default function DashboardPage() {
 
   const reasonMonth = useMemo(() => suspendReasonCount(viewRows), [viewRows]);
   const reasonToday = useMemo(() => suspendReasonCount(todayRows), [todayRows]);
-  const reasonYesterday = useMemo(
-    () => suspendReasonCount(yesterdayRows),
-    [yesterdayRows]
-  );
+  const reasonYesterday = useMemo(() => suspendReasonCount(yesterdayRows), [yesterdayRows]);
 
   const trendData = useMemo(() => {
     const map = new Map<string, any>();
@@ -171,14 +171,19 @@ export default function DashboardPage() {
     );
   }, [viewRows]);
 
-  const byVTKV = useMemo(() => groupByVTKV(viewRows), [viewRows]);
+  const byVTKV = useMemo(() => groupBy(viewRows, "vtkv"), [viewRows]);
+  const byCNKD = useMemo(() => groupBy(viewRows, "cnkd"), [viewRows]);
+
+  const cnkdTotalPages = Math.max(1, Math.ceil(byCNKD.length / PAGE_SIZE));
+
+  const cnkdPageData = useMemo(() => {
+    const start = (cnkdPage - 1) * PAGE_SIZE;
+    return byCNKD.slice(start, start + PAGE_SIZE);
+  }, [byCNKD, cnkdPage]);
 
   const vtkvSuspendChart = useMemo(() => {
     return byVTKV
-      .map((x) => ({
-        name: x.name,
-        value: x.total,
-      }))
+      .map((x) => ({ name: x.name, value: x.total }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 15);
   }, [byVTKV]);
@@ -186,16 +191,8 @@ export default function DashboardPage() {
   const suspendReasonChart = useMemo(() => {
     return [
       { name: "KHYC", value: reasonMonth.KHYC || 0, color: COLORS.blue },
-      {
-        name: "Nợ cước",
-        value: reasonMonth["Nợ cước"] || 0,
-        color: COLORS.orange,
-      },
-      {
-        name: "KHYC+NC",
-        value: reasonMonth["KHYC+NC"] || 0,
-        color: COLORS.purple,
-      },
+      { name: "Nợ cước", value: reasonMonth["Nợ cước"] || 0, color: COLORS.orange },
+      { name: "KHYC+NC", value: reasonMonth["KHYC+NC"] || 0, color: COLORS.purple },
     ];
   }, [reasonMonth]);
 
@@ -226,9 +223,7 @@ export default function DashboardPage() {
   return (
     <main className="min-h-screen bg-[#f8fafc] flex text-slate-900">
       <aside className="w-[250px] bg-white border-r border-slate-200 min-h-screen p-5 hidden lg:block relative">
-        <div className="text-xl font-black text-blue-600 mb-8">
-          FTTH Recovery
-        </div>
+        <div className="text-xl font-black text-blue-600 mb-8">FTTH Recovery</div>
 
         <Nav active label="Dashboard V2" onClick={() => router.push("/dashboard")} />
         <Nav label="Danh sách thuê bao" onClick={() => router.push("/subscribers")} />
@@ -288,12 +283,10 @@ export default function DashboardPage() {
 
         <div className="p-6">
           {loading ? (
-            <div className="bg-white rounded-2xl p-8 shadow">
-              Đang tải dữ liệu...
-            </div>
+            <div className="bg-white rounded-2xl p-8 shadow">Đang tải dữ liệu...</div>
           ) : (
             <>
-              <div className="grid grid-cols-1 xl:grid-cols-4 gap-5 mb-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7 gap-5 mb-6">
                 <MainCard
                   title="Tạm ngưng tháng"
                   value={monthStats.total}
@@ -339,6 +332,42 @@ export default function DashboardPage() {
                     ["Đã đóng việc", monthStats.closed],
                   ]}
                   onClick={() => goList("not_contacted")}
+                />
+
+                <MainCard
+                  title="Đã tiếp xúc"
+                  value={monthStats.contacted}
+                  subtitle={`${monthStats.contactRate}% trên tổng TN`}
+                  color={COLORS.green}
+                  extra={[
+                    ["Tổng tạm ngưng", monthStats.total],
+                    ["Chưa tiếp xúc", monthStats.notContacted],
+                  ]}
+                  onClick={() => goList("contacted")}
+                />
+
+                <MainCard
+                  title="Đã khôi phục"
+                  value={monthStats.recovered}
+                  subtitle="Thuê bao đã khôi phục"
+                  color={COLORS.teal}
+                  extra={[
+                    ["Đang xử lý", monthStats.pending],
+                    ["Đã đóng việc", monthStats.closed],
+                  ]}
+                  onClick={() => goList("recovered")}
+                />
+
+                <MainCard
+                  title="Tỷ lệ khôi phục"
+                  value={`${monthStats.recoveryRate}%`}
+                  subtitle={`${num(monthStats.recovered)} / ${num(monthStats.total)} thuê bao`}
+                  color={COLORS.purple}
+                  extra={[
+                    ["Đã khôi phục", monthStats.recovered],
+                    ["Chưa khôi phục", monthStats.total - monthStats.recovered],
+                  ]}
+                  onClick={() => goList("recovered")}
                 />
               </div>
 
@@ -406,7 +435,7 @@ export default function DashboardPage() {
 
                 <section className="bg-white rounded-2xl shadow p-6">
                   <h2 className="font-black text-xl mb-5">
-                    Cơ cấu lý do tạm ngưng
+                    Cơ cấu nguyên nhân tạm ngưng
                   </h2>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
@@ -468,11 +497,35 @@ export default function DashboardPage() {
 
               <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
                 <section className="xl:col-span-2 bg-white rounded-2xl shadow p-6">
-                  <h2 className="font-black text-xl mb-5">
-                    Cơ cấu lý do tạm ngưng
-                  </h2>
+                  <div className="flex justify-between items-center mb-5">
+                    <h2 className="font-black text-xl">Thống kê theo CNKD</h2>
 
-                  <ReasonTable total={monthStats.total} reason={reasonMonth} />
+                    <div className="flex items-center gap-3 text-sm">
+                      <button
+                        onClick={() => setCnkdPage((p) => Math.max(1, p - 1))}
+                        disabled={cnkdPage <= 1}
+                        className="px-4 py-2 rounded-lg bg-slate-100 font-bold disabled:opacity-40"
+                      >
+                        Previous
+                      </button>
+
+                      <span>
+                        Trang <b>{cnkdPage}</b> / <b>{cnkdTotalPages}</b>
+                      </span>
+
+                      <button
+                        onClick={() =>
+                          setCnkdPage((p) => Math.min(cnkdTotalPages, p + 1))
+                        }
+                        disabled={cnkdPage >= cnkdTotalPages}
+                        className="px-4 py-2 rounded-lg bg-slate-100 font-bold disabled:opacity-40"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+
+                  <StatsTable data={cnkdPageData} firstCol="CNKD" />
                 </section>
 
                 <section className="bg-white rounded-2xl shadow p-6">
@@ -483,6 +536,7 @@ export default function DashboardPage() {
                   <Summary label="Tạm ngưng N-1" value={yesterdayStats.total} />
                   <Summary label="Đã tiếp xúc" value={monthStats.contacted} />
                   <Summary label="Đã khôi phục" value={monthStats.recovered} />
+                  <Summary label="Tỷ lệ khôi phục" value={`${monthStats.recoveryRate}%`} />
                   <Summary label="Chưa tiếp xúc" value={monthStats.notContacted} />
                   <Summary label="Tồn > 7 ngày" value={monthStats.over7} />
                   <Summary label="Tồn > 15 ngày" value={monthStats.over15} />
@@ -491,11 +545,8 @@ export default function DashboardPage() {
 
               {role !== "CNKD" && (
                 <section className="bg-white rounded-2xl shadow p-6 mt-6">
-                  <h2 className="font-black text-xl mb-5">
-                    Thống kê theo VTKV
-                  </h2>
-
-                  <StatsTable data={byVTKV} />
+                  <h2 className="font-black text-xl mb-5">Thống kê theo VTKV</h2>
+                  <StatsTable data={byVTKV} firstCol="VTKV" />
                 </section>
               )}
             </>
@@ -527,19 +578,10 @@ function VerticalBarChart({ data, color, dataKey, name }: any) {
   return (
     <div className="h-[360px]">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart
-          data={data}
-          layout="vertical"
-          margin={{ left: 40, right: 20 }}
-        >
+        <BarChart data={data} layout="vertical" margin={{ left: 40, right: 20 }}>
           <CartesianGrid strokeDasharray="3 3" />
           <XAxis type="number" allowDecimals={false} />
-          <YAxis
-            type="category"
-            dataKey="name"
-            width={130}
-            tick={{ fontSize: 12 }}
-          />
+          <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 12 }} />
           <Tooltip />
           <Bar dataKey={dataKey} name={name} fill={color} radius={[0, 8, 8, 0]} />
         </BarChart>
@@ -566,7 +608,7 @@ function MainCard({
       <div className="text-sm font-bold text-slate-500 uppercase">{title}</div>
 
       <div className="text-5xl font-black mt-3" style={{ color }}>
-        {num(value)}
+        {numOrText(value)}
       </div>
 
       <div className="text-sm text-slate-500 mt-2">{subtitle}</div>
@@ -574,11 +616,7 @@ function MainCard({
       {typeof delta === "number" && (
         <div
           className={`mt-3 font-black ${
-            delta > 0
-              ? "text-red-600"
-              : delta < 0
-              ? "text-green-600"
-              : "text-slate-500"
+            delta > 0 ? "text-red-600" : delta < 0 ? "text-green-600" : "text-slate-500"
           }`}
         >
           {delta > 0 ? "↑" : delta < 0 ? "↓" : "→"} {delta > 0 ? "+" : ""}
@@ -633,106 +671,59 @@ function ProgressLine({ label, value, total, color }: any) {
       <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
         <div
           className="h-full rounded-full"
-          style={{
-            width: `${pct(value, total)}%`,
-            background: color,
-          }}
+          style={{ width: `${pct(value, total)}%`, background: color }}
         />
       </div>
     </div>
   );
 }
 
-function ReasonTable({ reason, total }: any) {
-  const rows = [
-    ["KHYC", reason.KHYC || 0, COLORS.blue],
-    ["Nợ cước", reason["Nợ cước"] || 0, COLORS.orange],
-    ["KHYC+NC", reason["KHYC+NC"] || 0, COLORS.purple],
-  ];
-
+function StatsTable({ data, firstCol }: any) {
   return (
-    <table className="w-full text-sm">
-      <thead>
-        <tr>
-          <Th>Lý do tạm ngưng</Th>
-          <Th>Số lượng</Th>
-          <Th>Tỷ lệ</Th>
-          <Th>Biểu đồ</Th>
-        </tr>
-      </thead>
-
-      <tbody>
-        {rows.map(([label, value, color]: any) => (
-          <tr key={label} className="border-t">
-            <Td bold>{label}</Td>
-            <Td>{num(value)}</Td>
-            <Td>{pct(value, total)}%</Td>
-            <td className="p-3 w-[45%]">
-              <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
-                <div
-                  className="h-full rounded-full"
-                  style={{
-                    width: `${pct(value, total)}%`,
-                    background: color,
-                  }}
-                />
-              </div>
-            </td>
+    <div className="overflow-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr>
+            <Th>{firstCol}</Th>
+            <Th>Tạm ngưng</Th>
+            <Th>Đã TX</Th>
+            <Th>Chưa TX</Th>
+            <Th>Khôi phục</Th>
+            <Th>Đóng việc</Th>
+            <Th>%TX</Th>
+            <Th>%KP</Th>
+            <Th>{">7 ngày"}</Th>
+            <Th>{">15 ngày"}</Th>
           </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
+        </thead>
 
-function StatsTable({ data }: any) {
-  return (
-    <table className="w-full text-sm">
-      <thead>
-        <tr>
-          <Th>VTKV</Th>
-          <Th>Tạm ngưng</Th>
-          <Th>Đã TX</Th>
-          <Th>Chưa TX</Th>
-          <Th>Khôi phục</Th>
-          <Th>Đóng việc</Th>
-          <Th>%TX</Th>
-          <Th>%KP</Th>
-        </tr>
-      </thead>
-
-      <tbody>
-        {data.map((r: any) => (
-          <tr key={r.name} className="border-t">
-            <Td bold>{r.name}</Td>
-            <Td>{num(r.total)}</Td>
-            <Td>{num(r.contacted)}</Td>
-            <Td>{num(r.notContacted)}</Td>
-            <Td>{num(r.recovered)}</Td>
-            <Td>{num(r.closed)}</Td>
-            <Td>{r.contactRate}%</Td>
-            <Td>{r.recoveryRate}%</Td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+        <tbody>
+          {data.map((r: any) => (
+            <tr key={r.name} className="border-t">
+              <Td bold>{r.name}</Td>
+              <Td>{num(r.total)}</Td>
+              <Td>{num(r.contacted)}</Td>
+              <Td>{num(r.notContacted)}</Td>
+              <Td>{num(r.recovered)}</Td>
+              <Td>{num(r.closed)}</Td>
+              <Td>{r.contactRate}%</Td>
+              <Td>{r.recoveryRate}%</Td>
+              <Td>{num(r.over7)}</Td>
+              <Td>{num(r.over15)}</Td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
 function buildStats(data: Row[]) {
   const total = data.length;
 
-  const contacted = data.filter(
-    (r) => up(r.latest_contact_status) === "CONTACTED"
-  ).length;
-
-  const recovered = data.filter(
-    (r) => up(r.latest_recovery_result) === "RECOVERED"
-  ).length;
-
-  const closed = data.filter(
-    (r) => up(r.latest_workflow_status) === "COMPLETED"
-  ).length;
+  const contacted = data.filter((r) => up(r.latest_contact_status) === "CONTACTED").length;
+  const recovered = data.filter((r) => up(r.latest_recovery_result) === "RECOVERED").length;
+  const closed = data.filter((r) => up(r.latest_workflow_status) === "COMPLETED").length;
 
   const failed = data.filter((r) =>
     ["FAILED", "NOT_RECOVERED"].includes(up(r.latest_recovery_result))
@@ -789,11 +780,11 @@ function topCount(data: Row[], field: keyof Row, limit = 10) {
     .slice(0, limit);
 }
 
-function groupByVTKV(data: Row[]) {
+function groupBy(data: Row[], field: "vtkv" | "cnkd") {
   const map = new Map<string, Row[]>();
 
   data.forEach((r) => {
-    const key = r.vtkv || "Không xác định";
+    const key = String(r[field] || "Không xác định").trim();
     if (!map.has(key)) map.set(key, []);
     map.get(key)?.push(r);
   });
@@ -823,7 +814,7 @@ function Summary({ label, value }: any) {
   return (
     <div className="flex justify-between py-3 border-b">
       <span className="text-slate-600">{label}</span>
-      <b>{num(value)}</b>
+      <b>{numOrText(value)}</b>
     </div>
   );
 }
@@ -865,7 +856,7 @@ function numOrText(v: any) {
 }
 
 function Th({ children }: any) {
-  return <th className="text-left p-3 font-bold text-slate-600">{children}</th>;
+  return <th className="text-left p-3 font-bold text-slate-600 whitespace-nowrap">{children}</th>;
 }
 
 function Td({ children, bold }: any) {
