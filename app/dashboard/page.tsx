@@ -44,17 +44,22 @@ const COLORS = {
   teal: "#0f766e",
 };
 
+const PAGE_SIZE = 30;
 
 export default function DashboardPage() {
   const router = useRouter();
+
+  // dashboardRef: toàn bộ phần hiển thị trên web
+  // exportRef: chỉ vùng sẽ xuất PNG/copy PNG = Header + KPI + Chart, không gồm bảng VTKV/CNKD
   const dashboardRef = useRef<HTMLDivElement | null>(null);
-  const chartExportRef = useRef<HTMLDivElement | null>(null);
+  const exportRef = useRef<HTMLDivElement | null>(null);
 
   const [user, setUser] = useState<any>(null);
   const [rows, setRows] = useState<Row[]>([]);
   const [selectedMonth, setSelectedMonth] = useState("ALL");
   const [selectedVTKV, setSelectedVTKV] = useState("ALL");
   const [loading, setLoading] = useState(true);
+  const [cnkdPage, setCnkdPage] = useState(1);
   const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
@@ -76,6 +81,9 @@ export default function DashboardPage() {
     loadData(token);
   }, [router]);
 
+  useEffect(() => {
+    setCnkdPage(1);
+  }, [selectedMonth, selectedVTKV]);
 
   async function loadData(token: string) {
     setLoading(true);
@@ -181,6 +189,15 @@ export default function DashboardPage() {
   }, [viewRows, activeMonth]);
 
   const byVTKV = useMemo(() => groupBy(viewRows, "vtkv"), [viewRows]);
+  const byCNKD = useMemo(() => groupBy(viewRows, "cnkd"), [viewRows]);
+
+  const cnkdTotalPages = Math.max(1, Math.ceil(byCNKD.length / PAGE_SIZE));
+
+  const cnkdPageData = useMemo(() => {
+    const start = (cnkdPage - 1) * PAGE_SIZE;
+    return byCNKD.slice(start, start + PAGE_SIZE);
+  }, [byCNKD, cnkdPage]);
+
   const vtkvSuspendChart = useMemo(() => {
     return byVTKV
       .map((x) => ({ name: x.name, value: x.total }))
@@ -221,7 +238,7 @@ export default function DashboardPage() {
   }
 
   async function exportDashboardPNG(mode: "download" | "copy") {
-    const element = dashboardRef.current;
+    const element = exportRef.current;
     if (!element) return;
 
     setExporting(true);
@@ -229,7 +246,7 @@ export default function DashboardPage() {
     try {
       await new Promise((r) => setTimeout(r, 500));
 
-      const filename = `ftth-charts-${activeMonth}-${
+      const filename = `ftth-kpi-chart-${activeMonth}-${
         selectedVTKV === "ALL" ? "ALL" : selectedVTKV
       }.png`;
 
@@ -365,264 +382,299 @@ export default function DashboardPage() {
             <div className="bg-white rounded-2xl p-8 shadow">Đang tải dữ liệu...</div>
           ) : (
             <div ref={dashboardRef} data-export-root className="bg-white p-4">
-              <div className="mb-5">
-                <h2 className="text-2xl font-black">
-                  Báo cáo FTTH Recovery - {selectedVTKV === "ALL" ? "Toàn HNI" : selectedVTKV}
-                </h2>
-                <p className="text-sm text-slate-500">
-                  Tháng báo cáo: {activeMonth} | Thời điểm xuất:{" "}
-                  {new Date().toLocaleString("vi-VN")}
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7 gap-5 mb-6">
-                <MainCard
-                  title="Tạm ngưng tháng"
-                  value={monthStats.total}
-                  subtitle={selectedMonth === "ALL" ? `Tháng ${activeMonth}` : `Tháng ${selectedMonth}`}
-                  color={COLORS.blue}
-                  reasons={reasonMonth}
-                  onClick={() => goList("all")}
-                />
-
-                <MainCard
-                  title="Tạm ngưng ngày N"
-                  value={todayStats.total}
-                  subtitle={formatDateVi(today)}
-                  color={COLORS.red}
-                  delta={todayStats.total - yesterdayStats.total}
-                  reasons={reasonToday}
-                  onClick={() => goList("today")}
-                />
-
-                <MainCard
-                  title="Tạm ngưng N-1"
-                  value={yesterdayStats.total}
-                  subtitle={formatDateVi(yesterday)}
-                  color={COLORS.orange}
-                  reasons={reasonYesterday}
-                  extra={[
-                    ["Đã tiếp xúc", yesterdayStats.contacted],
-                    ["Đã khôi phục", yesterdayStats.recovered],
-                    ["% tiếp xúc", `${yesterdayStats.contactRate}%`],
-                  ]}
-                  onClick={() => goList("yesterday")}
-                />
-
-                <MainCard
-                  title="Tồn chưa tiếp xúc"
-                  value={monthStats.notContacted}
-                  subtitle="Cần điều hành xử lý"
-                  color={COLORS.purple}
-                  extra={[
-                    ["Đang xử lý", monthStats.pending],
-                    ["> 7 ngày", monthStats.over7],
-                    ["> 15 ngày", monthStats.over15],
-                    ["Đã đóng việc", monthStats.closed],
-                  ]}
-                  onClick={() => goList("not_contacted")}
-                />
-
-                <MainCard
-                  title="Đã tiếp xúc"
-                  value={monthStats.contacted}
-                  subtitle={`${monthStats.contactRate}% trên tổng TN`}
-                  color={COLORS.green}
-                  extra={[
-                    ["Tổng tạm ngưng", monthStats.total],
-                    ["Chưa tiếp xúc", monthStats.notContacted],
-                  ]}
-                  onClick={() => goList("contacted")}
-                />
-
-                <MainCard
-                  title="Đã khôi phục"
-                  value={monthStats.recovered}
-                  subtitle="Thuê bao đã khôi phục"
-                  color={COLORS.teal}
-                  extra={[
-                    ["Đang xử lý", monthStats.pending],
-                    ["Đã đóng việc", monthStats.closed],
-                  ]}
-                  onClick={() => goList("recovered")}
-                />
-
-                <MainCard
-                  title="Tỷ lệ khôi phục"
-                  value={`${monthStats.recoveryRate}%`}
-                  subtitle={`${num(monthStats.recovered)} / ${num(monthStats.total)} thuê bao`}
-                  color={COLORS.purple}
-                  extra={[
-                    ["Đã khôi phục", monthStats.recovered],
-                    ["Chưa khôi phục", monthStats.total - monthStats.recovered],
-                  ]}
-                  onClick={() => goList("recovered")}
-                />
-              </div>
-
-              <div ref={chartExportRef} className="bg-white p-4">
-              <div className="grid grid-cols-1 xl:grid-cols-4 gap-6 mb-6">
-                <section className="xl:col-span-3 bg-white rounded-2xl shadow p-6">
-                  <div className="flex justify-between items-center mb-5">
-                    <div>
-                      <h2 className="font-black text-xl">
-                        Xu hướng tạm ngưng theo ngày trong tháng
-                      </h2>
-                      <p className="text-sm text-slate-500">
-                        Cột cố định theo ngày 1 → cuối tháng | Line: tiếp xúc, khôi phục, đóng việc
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="h-[340px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <ComposedChart
-                        data={trendData}
-                        margin={{ top: 20, right: 20, left: 20, bottom: 20 }}
-                        barCategoryGap="80%"
-                        barGap={2}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                        <XAxis
-                          dataKey="day"
-                          interval={0}
-                          tick={{ fontSize: 11 }}
-                          tickFormatter={(v) => String(v).padStart(2, "0")}
-                        />
-                        <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                        <Tooltip
-                          formatter={(value: any, name: any) => [num(value), name]}
-                          labelFormatter={(label) => `Ngày ${label}`}
-                        />
-                        <Legend />
-                        <Bar
-                          dataKey="suspend"
-                          name="Tạm ngưng"
-                          fill={COLORS.blue}
-                          barSize={12}
-                          radius={[3, 3, 0, 0]}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="contact"
-                          name="Tiếp xúc"
-                          stroke={COLORS.green}
-                          strokeWidth={3}
-                          dot={{ r: 3 }}
-                          activeDot={{ r: 5 }}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="recovery"
-                          name="Khôi phục"
-                          stroke={COLORS.orange}
-                          strokeWidth={3}
-                          dot={{ r: 3 }}
-                          activeDot={{ r: 5 }}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="close"
-                          name="Đóng việc"
-                          stroke={COLORS.purple}
-                          strokeWidth={3}
-                          dot={{ r: 3 }}
-                          activeDot={{ r: 5 }}
-                        />
-                      </ComposedChart>
-                    </ResponsiveContainer>
-                  </div>
-                </section>
-
-                <section className="bg-white rounded-2xl shadow p-6">
-                  <h2 className="font-black text-xl mb-5">Tổng quan tháng</h2>
-
-                  <Summary label="Tạm ngưng tháng" value={monthStats.total} />
-                  <Summary label="Tạm ngưng ngày N" value={todayStats.total} />
-                  <Summary label="Tạm ngưng N-1" value={yesterdayStats.total} />
-                  <Summary label="Đã tiếp xúc" value={monthStats.contacted} />
-                  <Summary label="Đã khôi phục" value={monthStats.recovered} />
-                  <Summary label="Tỷ lệ khôi phục" value={`${monthStats.recoveryRate}%`} />
-                  <Summary label="Chưa tiếp xúc" value={monthStats.notContacted} />
-                  <Summary label="Tồn > 7 ngày" value={monthStats.over7} />
-                  <Summary label="Tồn > 15 ngày" value={monthStats.over15} />
-                </section>
-              </div>
-
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
-                <ChartCard title="Top VTKV tạm ngưng trong tháng">
-                  <VerticalBarChart
-                    data={vtkvSuspendChart}
-                    color={COLORS.red}
-                    dataKey="value"
-                    name="Tạm ngưng"
-                  />
-                </ChartCard>
-
-                <section className="bg-white rounded-2xl shadow p-6">
-                  <h2 className="font-black text-xl mb-5">
-                    Cơ cấu nguyên nhân tạm ngưng
+              <div ref={exportRef} className="bg-white p-4">
+                <div className="mb-5">
+                  <h2 className="text-2xl font-black">
+                    Báo cáo FTTH Recovery - {selectedVTKV === "ALL" ? "Toàn HNI" : selectedVTKV}
                   </h2>
+                  <p className="text-sm text-slate-500">
+                    Tháng báo cáo: {activeMonth} | Thời điểm xuất: {" "}
+                    {new Date().toLocaleString("vi-VN")}
+                  </p>
+                </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
-                    <div className="h-[320px]">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7 gap-5 mb-6">
+                  <MainCard
+                    title="Tạm ngưng tháng"
+                    value={monthStats.total}
+                    subtitle={selectedMonth === "ALL" ? `Tháng ${activeMonth}` : `Tháng ${selectedMonth}`}
+                    color={COLORS.blue}
+                    reasons={reasonMonth}
+                    onClick={() => goList("all")}
+                  />
+
+                  <MainCard
+                    title="Tạm ngưng ngày N"
+                    value={todayStats.total}
+                    subtitle={formatDateVi(today)}
+                    color={COLORS.red}
+                    delta={todayStats.total - yesterdayStats.total}
+                    reasons={reasonToday}
+                    onClick={() => goList("today")}
+                  />
+
+                  <MainCard
+                    title="Tạm ngưng N-1"
+                    value={yesterdayStats.total}
+                    subtitle={formatDateVi(yesterday)}
+                    color={COLORS.orange}
+                    reasons={reasonYesterday}
+                    extra={[
+                      ["Đã tiếp xúc", yesterdayStats.contacted],
+                      ["Đã khôi phục", yesterdayStats.recovered],
+                      ["% tiếp xúc", `${yesterdayStats.contactRate}%`],
+                    ]}
+                    onClick={() => goList("yesterday")}
+                  />
+
+                  <MainCard
+                    title="Tồn chưa tiếp xúc"
+                    value={monthStats.notContacted}
+                    subtitle="Cần điều hành xử lý"
+                    color={COLORS.purple}
+                    extra={[
+                      ["Đang xử lý", monthStats.pending],
+                      ["> 7 ngày", monthStats.over7],
+                      ["> 15 ngày", monthStats.over15],
+                      ["Đã đóng việc", monthStats.closed],
+                    ]}
+                    onClick={() => goList("not_contacted")}
+                  />
+
+                  <MainCard
+                    title="Đã tiếp xúc"
+                    value={monthStats.contacted}
+                    subtitle={`${monthStats.contactRate}% trên tổng TN`}
+                    color={COLORS.green}
+                    extra={[
+                      ["Tổng tạm ngưng", monthStats.total],
+                      ["Chưa tiếp xúc", monthStats.notContacted],
+                    ]}
+                    onClick={() => goList("contacted")}
+                  />
+
+                  <MainCard
+                    title="Đã khôi phục"
+                    value={monthStats.recovered}
+                    subtitle="Thuê bao đã khôi phục"
+                    color={COLORS.teal}
+                    extra={[
+                      ["Đang xử lý", monthStats.pending],
+                      ["Đã đóng việc", monthStats.closed],
+                    ]}
+                    onClick={() => goList("recovered")}
+                  />
+
+                  <MainCard
+                    title="Tỷ lệ khôi phục"
+                    value={`${monthStats.recoveryRate}%`}
+                    subtitle={`${num(monthStats.recovered)} / ${num(monthStats.total)} thuê bao`}
+                    color={COLORS.purple}
+                    extra={[
+                      ["Đã khôi phục", monthStats.recovered],
+                      ["Chưa khôi phục", monthStats.total - monthStats.recovered],
+                    ]}
+                    onClick={() => goList("recovered")}
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 xl:grid-cols-4 gap-6 mb-6">
+                  <section className="xl:col-span-3 bg-white rounded-2xl shadow p-6">
+                    <div className="flex justify-between items-center mb-5">
+                      <div>
+                        <h2 className="font-black text-xl">
+                          Xu hướng tạm ngưng theo ngày trong tháng
+                        </h2>
+                        <p className="text-sm text-slate-500">
+                          Cột cố định theo ngày 1 → cuối tháng | Line: tiếp xúc, khôi phục, đóng việc
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="h-[340px]">
                       <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie
-                            data={suspendReasonChart}
-                            dataKey="value"
-                            nameKey="name"
-                            innerRadius={70}
-                            outerRadius={110}
-                            label
-                          >
-                            {suspendReasonChart.map((entry) => (
-                              <Cell key={entry.name} fill={entry.color} />
-                            ))}
-                          </Pie>
-                          <Tooltip />
+                        <ComposedChart
+                          data={trendData}
+                          margin={{ top: 20, right: 20, left: 20, bottom: 20 }}
+                          barCategoryGap="80%"
+                          barGap={2}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                          <XAxis
+                            dataKey="day"
+                            interval={0}
+                            tick={{ fontSize: 11 }}
+                            tickFormatter={(v) => String(v).padStart(2, "0")}
+                          />
+                          <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+                          <Tooltip
+                            formatter={(value: any, name: any) => [num(value), name]}
+                            labelFormatter={(label) => `Ngày ${label}`}
+                          />
                           <Legend />
-                        </PieChart>
+                          <Bar
+                            dataKey="suspend"
+                            name="Tạm ngưng"
+                            fill={COLORS.blue}
+                            barSize={12}
+                            radius={[3, 3, 0, 0]}
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="contact"
+                            name="Tiếp xúc"
+                            stroke={COLORS.green}
+                            strokeWidth={3}
+                            dot={{ r: 3 }}
+                            activeDot={{ r: 5 }}
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="recovery"
+                            name="Khôi phục"
+                            stroke={COLORS.orange}
+                            strokeWidth={3}
+                            dot={{ r: 3 }}
+                            activeDot={{ r: 5 }}
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="close"
+                            name="Đóng việc"
+                            stroke={COLORS.purple}
+                            strokeWidth={3}
+                            dot={{ r: 3 }}
+                            activeDot={{ r: 5 }}
+                          />
+                        </ComposedChart>
                       </ResponsiveContainer>
                     </div>
+                  </section>
 
-                    <div className="space-y-4">
-                      {suspendReasonChart.map((r) => (
-                        <ProgressLine
-                          key={r.name}
-                          label={r.name}
-                          value={r.value}
-                          total={monthStats.total}
-                          color={r.color}
-                        />
-                      ))}
+                  <section className="bg-white rounded-2xl shadow p-6">
+                    <h2 className="font-black text-xl mb-5">Tổng quan tháng</h2>
+
+                    <Summary label="Tạm ngưng tháng" value={monthStats.total} />
+                    <Summary label="Tạm ngưng ngày N" value={todayStats.total} />
+                    <Summary label="Tạm ngưng N-1" value={yesterdayStats.total} />
+                    <Summary label="Đã tiếp xúc" value={monthStats.contacted} />
+                    <Summary label="Đã khôi phục" value={monthStats.recovered} />
+                    <Summary label="Tỷ lệ khôi phục" value={`${monthStats.recoveryRate}%`} />
+                    <Summary label="Chưa tiếp xúc" value={monthStats.notContacted} />
+                    <Summary label="Tồn > 7 ngày" value={monthStats.over7} />
+                    <Summary label="Tồn > 15 ngày" value={monthStats.over15} />
+                  </section>
+                </div>
+
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
+                  <ChartCard title="Top VTKV tạm ngưng trong tháng">
+                    <VerticalBarChart
+                      data={vtkvSuspendChart}
+                      color={COLORS.red}
+                      dataKey="value"
+                      name="Tạm ngưng"
+                    />
+                  </ChartCard>
+
+                  <section className="bg-white rounded-2xl shadow p-6">
+                    <h2 className="font-black text-xl mb-5">
+                      Cơ cấu nguyên nhân tạm ngưng
+                    </h2>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+                      <div className="h-[320px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={suspendReasonChart}
+                              dataKey="value"
+                              nameKey="name"
+                              innerRadius={70}
+                              outerRadius={110}
+                              label
+                            >
+                              {suspendReasonChart.map((entry) => (
+                                <Cell key={entry.name} fill={entry.color} />
+                              ))}
+                            </Pie>
+                            <Tooltip />
+                            <Legend />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      </div>
+
+                      <div className="space-y-4">
+                        {suspendReasonChart.map((r) => (
+                          <ProgressLine
+                            key={r.name}
+                            label={r.name}
+                            value={r.value}
+                            total={monthStats.total}
+                            color={r.color}
+                          />
+                        ))}
+                      </div>
                     </div>
-                  </div>
+                  </section>
+                </div>
+
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
+                  <ChartCard title="Nguyên nhân cấp 1">
+                    <VerticalBarChart
+                      data={reasonL1Chart}
+                      color={COLORS.teal}
+                      dataKey="value"
+                      name="Nguyên nhân cấp 1"
+                    />
+                  </ChartCard>
+
+                  <ChartCard title="Nguyên nhân cấp 2">
+                    <VerticalBarChart
+                      data={reasonL2Chart}
+                      color={COLORS.orange}
+                      dataKey="value"
+                      name="Nguyên nhân cấp 2"
+                    />
+                  </ChartCard>
+                </div>
+              </div>
+
+              {role !== "CNKD" && (
+                <section className="bg-white rounded-2xl shadow p-6 mt-6">
+                  <h2 className="font-black text-xl mb-5">Thống kê theo VTKV</h2>
+                  <StatsTable data={byVTKV} firstCol="VTKV" />
                 </section>
-              </div>
+              )}
 
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
-                <ChartCard title="Nguyên nhân cấp 1">
-                  <VerticalBarChart
-                    data={reasonL1Chart}
-                    color={COLORS.teal}
-                    dataKey="value"
-                    name="Nguyên nhân cấp 1"
-                  />
-                </ChartCard>
+              <section className="bg-white rounded-2xl shadow p-6 mt-6">
+                <div className="flex justify-between items-center mb-5">
+                  <h2 className="font-black text-xl">Thống kê theo CNKD</h2>
 
-                <ChartCard title="Nguyên nhân cấp 2">
-                  <VerticalBarChart
-                    data={reasonL2Chart}
-                    color={COLORS.orange}
-                    dataKey="value"
-                    name="Nguyên nhân cấp 2"
-                  />
-                </ChartCard>
-              </div>
+                  <div className="flex items-center gap-3 text-sm no-export">
+                    <button
+                      onClick={() => setCnkdPage((p) => Math.max(1, p - 1))}
+                      disabled={cnkdPage <= 1}
+                      className="px-4 py-2 rounded-lg bg-slate-100 font-bold disabled:opacity-40"
+                    >
+                      Previous
+                    </button>
 
-              </div>
+                    <span>
+                      Trang <b>{cnkdPage}</b> / <b>{cnkdTotalPages}</b>
+                    </span>
 
+                    <button
+                      onClick={() => setCnkdPage((p) => Math.min(cnkdTotalPages, p + 1))}
+                      disabled={cnkdPage >= cnkdTotalPages}
+                      className="px-4 py-2 rounded-lg bg-slate-100 font-bold disabled:opacity-40"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+
+                <StatsTable data={cnkdPageData} firstCol="CNKD" />
+              </section>
             </div>
           )}
         </div>
@@ -748,6 +800,46 @@ function ProgressLine({ label, value, total, color }: any) {
           style={{ width: `${pct(value, total)}%`, background: color }}
         />
       </div>
+    </div>
+  );
+}
+
+function StatsTable({ data, firstCol }: any) {
+  return (
+    <div className="overflow-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr>
+            <Th>{firstCol}</Th>
+            <Th>Tạm ngưng</Th>
+            <Th>Đã TX</Th>
+            <Th>Chưa TX</Th>
+            <Th>Khôi phục</Th>
+            <Th>Đóng việc</Th>
+            <Th>%TX</Th>
+            <Th>%KP</Th>
+            <Th>{">7 ngày"}</Th>
+            <Th>{">15 ngày"}</Th>
+          </tr>
+        </thead>
+
+        <tbody>
+          {data.map((r: any) => (
+            <tr key={r.name} className="border-t">
+              <Td bold>{r.name}</Td>
+              <Td>{num(r.total)}</Td>
+              <Td>{num(r.contacted)}</Td>
+              <Td>{num(r.notContacted)}</Td>
+              <Td>{num(r.recovered)}</Td>
+              <Td>{num(r.closed)}</Td>
+              <Td>{r.contactRate}%</Td>
+              <Td>{r.recoveryRate}%</Td>
+              <Td>{num(r.over7)}</Td>
+              <Td>{num(r.over15)}</Td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -919,3 +1011,18 @@ function numOrText(v: any) {
   return num(v);
 }
 
+function Th({ children }: any) {
+  return (
+    <th className="text-left p-3 font-bold text-slate-600 whitespace-nowrap">
+      {children}
+    </th>
+  );
+}
+
+function Td({ children, bold }: any) {
+  return (
+    <td className={`p-3 whitespace-nowrap ${bold ? "font-bold" : ""}`}>
+      {children}
+    </td>
+  );
+}
