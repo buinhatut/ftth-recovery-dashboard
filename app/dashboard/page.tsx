@@ -48,9 +48,6 @@ const PAGE_SIZE = 30;
 
 export default function DashboardPage() {
   const router = useRouter();
-
-  // dashboardRef: toàn bộ phần hiển thị trên web
-  // exportRef: chỉ vùng sẽ xuất PNG/copy PNG = Header + KPI + Chart, không gồm bảng VTKV/CNKD
   const dashboardRef = useRef<HTMLDivElement | null>(null);
   const exportRef = useRef<HTMLDivElement | null>(null);
 
@@ -88,17 +85,18 @@ export default function DashboardPage() {
   async function loadData(token: string) {
     setLoading(true);
 
-    const res = await fetch(
-      `/api/proxy?action=getCurrentStatus&token=${encodeURIComponent(token)}`
-    );
+    try {
+      const res = await fetch(
+        `/api/proxy?action=getCurrentStatus&token=${encodeURIComponent(token)}`
+      );
+      const data = await res.json();
 
-    const data = await res.json();
-
-    if (data.status === "OK") {
-      setRows(data.data || []);
+      if (data.status === "OK") {
+        setRows(data.data || []);
+      }
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   }
 
   const role = String(user?.role || "").toUpperCase();
@@ -308,7 +306,7 @@ export default function DashboardPage() {
         <Nav active label="Dashboard V2" onClick={() => router.push("/dashboard")} />
         <Nav label="Danh sách thuê bao" onClick={() => router.push("/subscribers")} />
         <Nav label="Import dữ liệu" onClick={() => router.push("/import")} />
-        <Nav label="Cấu hình lý do" />
+        <Nav label="Cấu hình lý do" onClick={() => router.push("/reason-config")} />
         <Nav label="Nhật ký cập nhật" />
 
         <div className="absolute bottom-6 left-5 right-5 text-sm">
@@ -388,7 +386,7 @@ export default function DashboardPage() {
                     Báo cáo FTTH Recovery - {selectedVTKV === "ALL" ? "Toàn HNI" : selectedVTKV}
                   </h2>
                   <p className="text-sm text-slate-500">
-                    Tháng báo cáo: {activeMonth} | Thời điểm xuất: {" "}
+                    Tháng báo cáo: {activeMonth} | Thời điểm xuất:{" "}
                     {new Date().toLocaleString("vi-VN")}
                   </p>
                 </div>
@@ -650,7 +648,7 @@ export default function DashboardPage() {
                 <div className="flex justify-between items-center mb-5">
                   <h2 className="font-black text-xl">Thống kê theo CNKD</h2>
 
-                  <div className="flex items-center gap-3 text-sm no-export">
+                  <div className="flex items-center gap-3 text-sm">
                     <button
                       onClick={() => setCnkdPage((p) => Math.max(1, p - 1))}
                       disabled={cnkdPage <= 1}
