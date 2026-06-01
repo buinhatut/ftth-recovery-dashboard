@@ -11,54 +11,59 @@ type ReasonRow = {
   status: string;
 };
 
-type FormState = ReasonRow;
-
-const EMPTY_FORM: FormState = {
-  reason_l1_id: "",
-  reason_l1: "",
-  reason_l2_id: "",
-  reason_l2: "",
-  status: "ACTIVE",
+type L1Option = {
+  reason_l1_id: string;
+  reason_l1: string;
 };
 
 export default function ReasonConfigPage() {
   const router = useRouter();
 
   const [user, setUser] = useState<any>(null);
+  const [token, setToken] = useState("");
   const [rows, setRows] = useState<ReasonRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [keyword, setKeyword] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
-  const [form, setForm] = useState<FormState>(EMPTY_FORM);
-  const [editingL2Id, setEditingL2Id] = useState("");
+
+  const [mode, setMode] = useState<"L1" | "L2">("L2");
+  const [reasonL1Id, setReasonL1Id] = useState("");
+  const [reasonL1Name, setReasonL1Name] = useState("");
+  const [reasonL2Id, setReasonL2Id] = useState("");
+  const [reasonL2Name, setReasonL2Name] = useState("");
+  const [editKey, setEditKey] = useState("");
 
   useEffect(() => {
-    const token = localStorage.getItem("ftth_token");
-    const userText = localStorage.getItem("ftth_user");
+    const t = localStorage.getItem("ftth_token") || "";
+    const userText = localStorage.getItem("ftth_user") || "";
 
-    if (!token || !userText) {
+    if (!t || !userText) {
       router.push("/login");
       return;
     }
 
-    setUser(JSON.parse(userText));
-    loadReasonConfig(token);
+    const u = JSON.parse(userText);
+    setUser(u);
+    setToken(t);
+    loadData(t);
   }, [router]);
 
-  const role = String(user?.role || "").toUpperCase();
-  const canEdit = role === "CN";
+  async function api(action: string, body?: any) {
+    const res = await fetch(`/api/proxy?action=${action}&token=${encodeURIComponent(token)}`, {
+      method: body ? "POST" : "GET",
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      body: body ? JSON.stringify({ ...body, token }) : undefined,
+    });
 
-  async function loadReasonConfig(token?: string) {
-    const t = token || localStorage.getItem("ftth_token") || "";
+    return res.json();
+  }
 
+  async function loadData(t = token) {
     setLoading(true);
 
     try {
-      const res = await fetch(
-        `/api/proxy?action=getReasonConfig&token=${encodeURIComponent(t)}`
-      );
-
+      const res = await fetch(`/api/proxy?action=getReasonConfig&token=${encodeURIComponent(t)}`);
       const data = await res.json();
 
       if (data.status === "OK") {
@@ -67,116 +72,170 @@ export default function ReasonConfigPage() {
         alert(data.message || "Không tải được cấu hình lý do");
       }
     } catch (err: any) {
-      alert("Không tải được cấu hình lý do: " + (err?.message || err));
+      alert("Không tải được cấu hình lý do: " + err.message);
     } finally {
       setLoading(false);
     }
   }
 
-  async function saveReasonConfig() {
-    if (!canEdit) {
-      alert("Chỉ quyền CN được thêm/sửa cấu hình lý do");
-      return;
-    }
+  const l1Options = useMemo<L1Option[]>(() => {
+    const map = new Map<string, string>();
 
-    const token = localStorage.getItem("ftth_token") || "";
-
-    const payload: FormState = {
-      reason_l1_id: form.reason_l1_id.trim().toUpperCase(),
-      reason_l1: form.reason_l1.trim(),
-      reason_l2_id: form.reason_l2_id.trim().toUpperCase(),
-      reason_l2: form.reason_l2.trim(),
-      status: String(form.status || "ACTIVE").trim().toUpperCase(),
-    };
-
-    if (!payload.reason_l1_id || !payload.reason_l1 || !payload.reason_l2_id || !payload.reason_l2) {
-      alert("Anh nhập đủ Mã cấp 1, Tên cấp 1, Mã cấp 2, Tên cấp 2");
-      return;
-    }
-
-    setSaving(true);
-
-    try {
-      const qs = new URLSearchParams();
-      qs.set("action", "saveReasonConfig");
-      qs.set("token", token);
-      qs.set("reason_l1_id", payload.reason_l1_id);
-      qs.set("reason_l1", payload.reason_l1);
-      qs.set("reason_l2_id", payload.reason_l2_id);
-      qs.set("reason_l2", payload.reason_l2);
-      qs.set("status", payload.status);
-
-      const res = await fetch(`/api/proxy?${qs.toString()}`);
-      const data = await res.json();
-
-      if (data.status !== "OK") {
-        alert(data.message || "Không lưu được cấu hình lý do");
-        return;
-      }
-
-      alert(data.message || "Đã lưu cấu hình lý do");
-      setForm(EMPTY_FORM);
-      setEditingL2Id("");
-      await loadReasonConfig(token);
-    } catch (err: any) {
-      alert("Không lưu được cấu hình lý do: " + (err?.message || err));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function inactiveReason(r: ReasonRow) {
-    if (!canEdit) {
-      alert("Chỉ quyền CN được khóa cấu hình lý do");
-      return;
-    }
-
-    const ok = confirm(`Chuyển lý do ${r.reason_l2_id} - ${r.reason_l2} sang INACTIVE?`);
-    if (!ok) return;
-
-    const token = localStorage.getItem("ftth_token") || "";
-
-    setSaving(true);
-
-    try {
-      const qs = new URLSearchParams();
-      qs.set("action", "deleteReasonConfig");
-      qs.set("token", token);
-      qs.set("reason_l2_id", r.reason_l2_id);
-
-      const res = await fetch(`/api/proxy?${qs.toString()}`);
-      const data = await res.json();
-
-      if (data.status !== "OK") {
-        alert(data.message || "Không khóa được lý do");
-        return;
-      }
-
-      alert(data.message || "Đã khóa lý do");
-      await loadReasonConfig(token);
-    } catch (err: any) {
-      alert("Không khóa được lý do: " + (err?.message || err));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function editReason(r: ReasonRow) {
-    setEditingL2Id(r.reason_l2_id);
-    setForm({
-      reason_l1_id: String(r.reason_l1_id || ""),
-      reason_l1: String(r.reason_l1 || ""),
-      reason_l2_id: String(r.reason_l2_id || ""),
-      reason_l2: String(r.reason_l2 || ""),
-      status: String(r.status || "ACTIVE").toUpperCase(),
+    rows.forEach((r) => {
+      if (up(r.status) !== "ACTIVE") return;
+      if (!r.reason_l1_id || !r.reason_l1) return;
+      map.set(r.reason_l1_id, r.reason_l1);
     });
 
+    return Array.from(map.entries())
+      .map(([reason_l1_id, reason_l1]) => ({ reason_l1_id, reason_l1 }))
+      .sort((a, b) => a.reason_l1.localeCompare(b.reason_l1, "vi"));
+  }, [rows]);
+
+  const filteredRows = useMemo(() => {
+    const k = keyword.trim().toLowerCase();
+
+    return rows.filter((r) => {
+      const okStatus = statusFilter === "ALL" || up(r.status) === statusFilter;
+      const text = `${r.reason_l1_id} ${r.reason_l1} ${r.reason_l2_id} ${r.reason_l2} ${r.status}`.toLowerCase();
+      const okKeyword = !k || text.includes(k);
+      return okStatus && okKeyword;
+    });
+  }, [rows, keyword, statusFilter]);
+
+  const l1Summary = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; total: number; active: number }>();
+
+    rows.forEach((r) => {
+      const id = r.reason_l1_id || "";
+      const name = r.reason_l1 || "";
+      if (!id || !name) return;
+
+      if (!map.has(id)) {
+        map.set(id, { id, name, total: 0, active: 0 });
+      }
+
+      const item = map.get(id)!;
+      item.total += 1;
+      if (up(r.status) === "ACTIVE") item.active += 1;
+    });
+
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, "vi"));
+  }, [rows]);
+
+  function resetForm() {
+    setMode("L2");
+    setReasonL1Id("");
+    setReasonL1Name("");
+    setReasonL2Id("");
+    setReasonL2Name("");
+    setEditKey("");
+  }
+
+  function onSelectL1(id: string) {
+    setReasonL1Id(id);
+    const found = l1Options.find((x) => x.reason_l1_id === id);
+    setReasonL1Name(found?.reason_l1 || "");
+  }
+
+  async function saveReason() {
+    if (up(user?.role) !== "CN") {
+      alert("Chỉ quyền CN được cấu hình lý do");
+      return;
+    }
+
+    if (mode === "L1") {
+      if (!reasonL1Id.trim() || !reasonL1Name.trim()) {
+        alert("Vui lòng nhập mã và tên nguyên nhân cấp 1");
+        return;
+      }
+    }
+
+    if (mode === "L2") {
+      if (!reasonL1Id.trim()) {
+        alert("Vui lòng chọn nguyên nhân cấp 1");
+        return;
+      }
+      if (!reasonL2Id.trim() || !reasonL2Name.trim()) {
+        alert("Vui lòng nhập mã và tên nguyên nhân cấp 2");
+        return;
+      }
+    }
+
+    setSaving(true);
+
+    try {
+      const body = {
+        mode,
+        edit_key: editKey,
+        reason_l1_id: reasonL1Id.trim(),
+        reason_l1: reasonL1Name.trim(),
+        reason_l2_id: mode === "L1" ? "" : reasonL2Id.trim(),
+        reason_l2: mode === "L1" ? "" : reasonL2Name.trim(),
+        status: "ACTIVE",
+      };
+
+      const data = await api("saveReasonConfig", body);
+
+      if (data.status !== "OK") {
+        alert(data.message || "Không lưu được lý do");
+        return;
+      }
+
+      alert("Đã lưu cấu hình lý do");
+      resetForm();
+      await loadData();
+    } catch (err: any) {
+      alert("Không lưu được lý do: " + err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function editRow(r: ReasonRow) {
+    setMode(r.reason_l2_id ? "L2" : "L1");
+    setReasonL1Id(r.reason_l1_id || "");
+    setReasonL1Name(r.reason_l1 || "");
+    setReasonL2Id(r.reason_l2_id || "");
+    setReasonL2Name(r.reason_l2 || "");
+    setEditKey(makeKey(r));
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  function resetForm() {
-    setForm(EMPTY_FORM);
-    setEditingL2Id("");
+  async function toggleStatus(r: ReasonRow) {
+    if (up(user?.role) !== "CN") {
+      alert("Chỉ quyền CN được cấu hình lý do");
+      return;
+    }
+
+    const newStatus = up(r.status) === "ACTIVE" ? "INACTIVE" : "ACTIVE";
+
+    if (!confirm(`Chuyển trạng thái sang ${newStatus}?`)) return;
+
+    setSaving(true);
+
+    try {
+      const data = await api("saveReasonConfig", {
+        mode: r.reason_l2_id ? "L2" : "L1",
+        edit_key: makeKey(r),
+        reason_l1_id: r.reason_l1_id,
+        reason_l1: r.reason_l1,
+        reason_l2_id: r.reason_l2_id,
+        reason_l2: r.reason_l2,
+        status: newStatus,
+      });
+
+      if (data.status !== "OK") {
+        alert(data.message || "Không đổi được trạng thái");
+        return;
+      }
+
+      await loadData();
+    } catch (err: any) {
+      alert("Không đổi được trạng thái: " + err.message);
+    } finally {
+      setSaving(false);
+    }
   }
 
   function logout() {
@@ -184,59 +243,6 @@ export default function ReasonConfigPage() {
     localStorage.removeItem("ftth_user");
     router.push("/login");
   }
-
-  const filteredRows = useMemo(() => {
-    const k = keyword.trim().toUpperCase();
-
-    return rows.filter((r) => {
-      const okStatus =
-        statusFilter === "ALL" || String(r.status || "").toUpperCase() === statusFilter;
-
-      const text = [
-        r.reason_l1_id,
-        r.reason_l1,
-        r.reason_l2_id,
-        r.reason_l2,
-        r.status,
-      ]
-        .join(" ")
-        .toUpperCase();
-
-      const okKeyword = !k || text.includes(k);
-
-      return okStatus && okKeyword;
-    });
-  }, [rows, keyword, statusFilter]);
-
-  const groupedL1 = useMemo(() => {
-    const map = new Map<string, { id: string; name: string; active: number; total: number }>();
-
-    rows.forEach((r) => {
-      const id = String(r.reason_l1_id || "").trim();
-      if (!id) return;
-
-      if (!map.has(id)) {
-        map.set(id, {
-          id,
-          name: r.reason_l1,
-          active: 0,
-          total: 0,
-        });
-      }
-
-      const item = map.get(id)!;
-      item.total += 1;
-
-      if (String(r.status || "").toUpperCase() === "ACTIVE") {
-        item.active += 1;
-      }
-    });
-
-    return Array.from(map.values()).sort((a, b) => a.id.localeCompare(b.id));
-  }, [rows]);
-
-  const activeL2 = rows.filter((r) => String(r.status || "").toUpperCase() === "ACTIVE").length;
-  const inactiveL2 = rows.filter((r) => String(r.status || "").toUpperCase() === "INACTIVE").length;
 
   return (
     <main className="min-h-screen bg-[#f8fafc] flex text-slate-900">
@@ -263,218 +269,239 @@ export default function ReasonConfigPage() {
       <section className="flex-1">
         <header className="h-[64px] bg-white border-b border-slate-200 flex items-center justify-between px-6 sticky top-0 z-10">
           <div>
-            <h1 className="font-black text-xl">Cấu hình nguyên nhân tạm ngưng</h1>
+            <h1 className="font-black text-xl">Cấu hình lý do tạm ngưng</h1>
             <p className="text-xs text-slate-500">
-              Thêm/sửa nguyên nhân cấp 1 và cấp 2 trên sheet CONFIG_REASON
+              Thêm/sửa nguyên nhân cấp 1 và cấp 2, dữ liệu lưu tại Google Sheet CONFIG_REASON
             </p>
           </div>
 
           <button
-            onClick={() => loadReasonConfig()}
-            disabled={loading || saving}
-            className="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold disabled:opacity-50"
+            onClick={() => loadData()}
+            className="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold"
           >
-            {loading ? "Đang tải..." : "Làm mới"}
+            Làm mới
           </button>
         </header>
 
         <div className="p-6 space-y-6">
-          <section className="bg-white rounded-2xl shadow p-5 grid grid-cols-1 md:grid-cols-4 gap-4">
-            <InfoCard title="Tổng dòng cấu hình" value={rows.length} />
-            <InfoCard title="Nguyên nhân cấp 1" value={groupedL1.length} />
-            <InfoCard title="Cấp 2 ACTIVE" value={activeL2} />
-            <InfoCard title="Cấp 2 INACTIVE" value={inactiveL2} />
-          </section>
+          {loading ? (
+            <div className="bg-white rounded-2xl p-8 shadow">Đang tải dữ liệu...</div>
+          ) : (
+            <>
+              <section className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <Metric title="Tổng dòng cấu hình" value={rows.length} />
+                <Metric title="Nguyên nhân cấp 1" value={l1Summary.length} />
+                <Metric title="Cấp 2 ACTIVE" value={rows.filter((r) => up(r.status) === "ACTIVE" && r.reason_l2_id).length} />
+                <Metric title="Cấp 2 INACTIVE" value={rows.filter((r) => up(r.status) === "INACTIVE" && r.reason_l2_id).length} />
+              </section>
 
-          <section className="bg-white rounded-2xl shadow p-5">
-            <div className="flex items-start justify-between gap-4 mb-5">
-              <div>
-                <h2 className="font-black text-xl">
-                  {editingL2Id ? "Sửa lý do" : "Thêm lý do mới"}
-                </h2>
-                <p className="text-sm text-slate-500">
-                  Mỗi dòng gồm 1 nguyên nhân cấp 1 và 1 nguyên nhân cấp 2.
-                </p>
-              </div>
-
-              {!canEdit && (
-                <div className="px-4 py-2 rounded-xl bg-orange-50 text-orange-700 text-sm font-bold">
-                  Chỉ quyền CN được thêm/sửa
+              <section className="bg-white rounded-2xl shadow p-6">
+                <div className="flex items-start justify-between gap-4 mb-5">
+                  <div>
+                    <h2 className="font-black text-xl">Thêm / sửa lý do</h2>
+                    <p className="text-sm text-slate-500">
+                      Khi thêm nguyên nhân cấp 2, chọn nguyên nhân cấp 1 bằng dropdown.
+                    </p>
+                  </div>
+                  <button onClick={resetForm} className="px-4 py-2 rounded-xl bg-slate-100 font-bold">
+                    Nhập mới
+                  </button>
                 </div>
-              )}
-            </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-              <InputBox
-                label="Mã cấp 1"
-                placeholder="VD: KT"
-                value={form.reason_l1_id}
-                disabled={!canEdit || saving}
-                onChange={(v: string) => setForm((f) => ({ ...f, reason_l1_id: v.toUpperCase() }))}
-              />
+                <div className="grid grid-cols-1 md:grid-cols-6 gap-4 items-end">
+                  <div>
+                    <label className="label">Loại thêm mới</label>
+                    <select
+                      value={mode}
+                      onChange={(e) => {
+                        const next = e.target.value as "L1" | "L2";
+                        setMode(next);
+                        setReasonL1Id("");
+                        setReasonL1Name("");
+                        setReasonL2Id("");
+                        setReasonL2Name("");
+                        setEditKey("");
+                      }}
+                      className="inputBox w-full"
+                    >
+                      <option value="L2">Thêm nguyên nhân cấp 2</option>
+                      <option value="L1">Thêm nguyên nhân cấp 1</option>
+                    </select>
+                  </div>
 
-              <InputBox
-                label="Tên cấp 1"
-                placeholder="VD: Kỹ thuật"
-                value={form.reason_l1}
-                disabled={!canEdit || saving}
-                onChange={(v: string) => setForm((f) => ({ ...f, reason_l1: v }))}
-              />
+                  {mode === "L2" ? (
+                    <div className="md:col-span-2">
+                      <label className="label">Chọn nguyên nhân cấp 1</label>
+                      <select
+                        value={reasonL1Id}
+                        onChange={(e) => onSelectL1(e.target.value)}
+                        className="inputBox w-full"
+                      >
+                        <option value="">-- Chọn cấp 1 --</option>
+                        {l1Options.map((x) => (
+                          <option key={x.reason_l1_id} value={x.reason_l1_id}>
+                            {x.reason_l1_id} - {x.reason_l1}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : (
+                    <>
+                      <div>
+                        <label className="label">Mã cấp 1</label>
+                        <input
+                          value={reasonL1Id}
+                          onChange={(e) => setReasonL1Id(e.target.value.toUpperCase())}
+                          className="inputBox w-full"
+                          placeholder="VD: KT"
+                        />
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className="label">Tên cấp 1</label>
+                        <input
+                          value={reasonL1Name}
+                          onChange={(e) => setReasonL1Name(e.target.value)}
+                          className="inputBox w-full"
+                          placeholder="VD: Kỹ thuật"
+                        />
+                      </div>
+                    </>
+                  )}
 
-              <InputBox
-                label="Mã cấp 2"
-                placeholder="VD: KT03"
-                value={form.reason_l2_id}
-                disabled={!canEdit || saving || Boolean(editingL2Id)}
-                onChange={(v: string) => setForm((f) => ({ ...f, reason_l2_id: v.toUpperCase() }))}
-              />
+                  {mode === "L2" && (
+                    <>
+                      <div>
+                        <label className="label">Mã cấp 2</label>
+                        <input
+                          value={reasonL2Id}
+                          onChange={(e) => setReasonL2Id(e.target.value.toUpperCase())}
+                          className="inputBox w-full"
+                          placeholder="VD: KT03"
+                        />
+                      </div>
+                      <div>
+                        <label className="label">Tên cấp 2</label>
+                        <input
+                          value={reasonL2Name}
+                          onChange={(e) => setReasonL2Name(e.target.value)}
+                          className="inputBox w-full"
+                          placeholder="VD: Mất kết nối"
+                        />
+                      </div>
+                    </>
+                  )}
 
-              <InputBox
-                label="Tên cấp 2"
-                placeholder="VD: Chập chờn"
-                value={form.reason_l2}
-                disabled={!canEdit || saving}
-                onChange={(v: string) => setForm((f) => ({ ...f, reason_l2: v }))}
-              />
+                  <button
+                    onClick={saveReason}
+                    disabled={saving}
+                    className="px-4 py-2 rounded-xl bg-green-600 text-white font-bold disabled:opacity-50"
+                  >
+                    {saving ? "Đang lưu..." : editKey ? "Cập nhật" : "Thêm mới"}
+                  </button>
+                </div>
+              </section>
 
-              <label className="block">
-                <div className="text-sm font-bold text-slate-600 mb-1">Trạng thái</div>
-                <select
-                  value={form.status}
-                  disabled={!canEdit || saving}
-                  onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))}
-                  className="w-full border rounded-xl px-4 py-3 bg-white"
-                >
-                  <option value="ACTIVE">ACTIVE</option>
-                  <option value="INACTIVE">INACTIVE</option>
-                </select>
-              </label>
-            </div>
-
-            <div className="flex gap-3 mt-5">
-              <button
-                onClick={saveReasonConfig}
-                disabled={!canEdit || saving}
-                className="px-5 py-3 rounded-xl bg-green-600 text-white font-black disabled:opacity-50"
-              >
-                {saving ? "Đang lưu..." : editingL2Id ? "Cập nhật" : "Thêm mới"}
-              </button>
-
-              <button
-                onClick={resetForm}
-                disabled={saving}
-                className="px-5 py-3 rounded-xl bg-slate-100 font-black disabled:opacity-50"
-              >
-                Nhập lại
-              </button>
-            </div>
-          </section>
-
-          <section className="bg-white rounded-2xl shadow p-5">
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-5">
-              <div>
-                <h2 className="font-black text-xl">Danh mục nguyên nhân cấp 1</h2>
-                <p className="text-sm text-slate-500">Mỗi cấp 1 có thể có nhiều nguyên nhân cấp 2.</p>
-              </div>
-
-              <div className="flex gap-3">
-                <input
-                  value={keyword}
-                  onChange={(e) => setKeyword(e.target.value)}
-                  placeholder="Tìm lý do..."
-                  className="border rounded-xl px-4 py-2 min-w-[220px]"
-                />
-
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                  className="border rounded-xl px-4 py-2 bg-white"
-                >
-                  <option value="ALL">Tất cả</option>
-                  <option value="ACTIVE">ACTIVE</option>
-                  <option value="INACTIVE">INACTIVE</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {groupedL1.map((g) => (
-                <div key={g.id} className="border rounded-2xl p-5">
-                  <div className="text-sm font-bold text-slate-500">{g.id}</div>
-                  <div className="text-xl font-black mt-2">{g.name}</div>
-                  <div className="text-sm text-slate-500 mt-4">
-                    ACTIVE: <b>{g.active}</b> / Tổng: <b>{g.total}</b>
+              <section className="bg-white rounded-2xl shadow p-6">
+                <div className="flex items-center justify-between mb-5 gap-4">
+                  <div>
+                    <h2 className="font-black text-xl">Danh mục nguyên nhân cấp 1</h2>
+                    <p className="text-sm text-slate-500">Mỗi cấp 1 có thể có nhiều nguyên nhân cấp 2.</p>
+                  </div>
+                  <div className="flex gap-3">
+                    <input
+                      value={keyword}
+                      onChange={(e) => setKeyword(e.target.value)}
+                      className="inputBox"
+                      placeholder="Tìm lý do..."
+                    />
+                    <select
+                      value={statusFilter}
+                      onChange={(e) => setStatusFilter(e.target.value)}
+                      className="inputBox"
+                    >
+                      <option value="ALL">Tất cả</option>
+                      <option value="ACTIVE">ACTIVE</option>
+                      <option value="INACTIVE">INACTIVE</option>
+                    </select>
                   </div>
                 </div>
-              ))}
-            </div>
-          </section>
 
-          <section className="bg-white rounded-2xl shadow p-5">
-            <h2 className="font-black text-xl mb-5">Chi tiết nguyên nhân cấp 1 / cấp 2</h2>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {l1Summary.map((x) => (
+                    <div key={x.id} className="border border-slate-200 rounded-2xl p-5">
+                      <div className="text-sm text-slate-500 font-bold">{x.id}</div>
+                      <div className="text-xl font-black mt-1">{x.name}</div>
+                      <div className="text-sm text-slate-500 mt-3">
+                        ACTIVE: {x.active} / Tổng: {x.total}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
 
-            {loading ? (
-              <div className="p-8 text-center text-slate-500">Đang tải dữ liệu...</div>
-            ) : (
-              <div className="overflow-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr>
-                      <Th>reason_l1_id</Th>
-                      <Th>reason_l1</Th>
-                      <Th>reason_l2_id</Th>
-                      <Th>reason_l2</Th>
-                      <Th>status</Th>
-                      <Th>Thao tác</Th>
-                    </tr>
-                  </thead>
+              <section className="bg-white rounded-2xl shadow p-6">
+                <h2 className="font-black text-xl mb-5">Chi tiết nguyên nhân cấp 1 / cấp 2</h2>
 
-                  <tbody>
-                    {filteredRows.map((r, idx) => (
-                      <tr key={`${r.reason_l1_id}-${r.reason_l2_id}-${idx}`} className="border-t">
-                        <Td bold>{r.reason_l1_id}</Td>
-                        <Td>{r.reason_l1}</Td>
-                        <Td bold>{r.reason_l2_id}</Td>
-                        <Td>{r.reason_l2}</Td>
-                        <Td>
-                          <span
-                            className={`px-3 py-1 rounded-full text-xs font-black ${
-                              String(r.status || "").toUpperCase() === "ACTIVE"
-                                ? "bg-green-50 text-green-700"
-                                : "bg-slate-100 text-slate-600"
-                            }`}
-                          >
-                            {r.status || "ACTIVE"}
-                          </span>
-                        </Td>
-                        <Td>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => editReason(r)}
-                              disabled={!canEdit || saving}
-                              className="px-3 py-2 rounded-lg bg-blue-50 text-blue-700 font-bold disabled:opacity-50"
-                            >
-                              Sửa
-                            </button>
-                            <button
-                              onClick={() => inactiveReason(r)}
-                              disabled={!canEdit || saving || String(r.status || "").toUpperCase() === "INACTIVE"}
-                              className="px-3 py-2 rounded-lg bg-red-50 text-red-700 font-bold disabled:opacity-50"
-                            >
-                              Khóa
-                            </button>
-                          </div>
-                        </Td>
+                <div className="overflow-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr>
+                        <Th>reason_l1_id</Th>
+                        <Th>reason_l1</Th>
+                        <Th>reason_l2_id</Th>
+                        <Th>reason_l2</Th>
+                        <Th>status</Th>
+                        <Th>Thao tác</Th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
+                    </thead>
+                    <tbody>
+                      {filteredRows.map((r) => (
+                        <tr key={makeKey(r)} className="border-t">
+                          <Td bold>{r.reason_l1_id}</Td>
+                          <Td>{r.reason_l1}</Td>
+                          <Td bold>{r.reason_l2_id}</Td>
+                          <Td>{r.reason_l2}</Td>
+                          <Td>
+                            <span
+                              className={`px-3 py-1 rounded-full text-xs font-black ${
+                                up(r.status) === "ACTIVE"
+                                  ? "bg-green-50 text-green-700"
+                                  : "bg-slate-100 text-slate-600"
+                              }`}
+                            >
+                              {up(r.status) || "ACTIVE"}
+                            </span>
+                          </Td>
+                          <Td>
+                            <div className="flex gap-2">
+                              <button onClick={() => editRow(r)} className="px-3 py-1 rounded-lg bg-blue-50 text-blue-700 font-bold">
+                                Sửa
+                              </button>
+                              <button onClick={() => toggleStatus(r)} className="px-3 py-1 rounded-lg bg-slate-100 font-bold">
+                                {up(r.status) === "ACTIVE" ? "Tắt" : "Bật"}
+                              </button>
+                            </div>
+                          </Td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </>
+          )}
         </div>
       </section>
     </main>
+  );
+}
+
+function Metric({ title, value }: any) {
+  return (
+    <div className="bg-white rounded-2xl shadow p-5 border border-slate-200">
+      <div className="text-sm text-slate-500 font-bold">{title}</div>
+      <div className="text-4xl font-black text-blue-600 mt-2">{Number(value || 0).toLocaleString("vi-VN")}</div>
+    </div>
   );
 }
 
@@ -491,44 +518,18 @@ function Nav({ label, active, onClick }: any) {
   );
 }
 
-function InfoCard({ title, value }: any) {
-  return (
-    <div className="border rounded-2xl p-5">
-      <div className="text-sm text-slate-500 font-bold">{title}</div>
-      <div className="text-4xl font-black text-blue-600 mt-2">{num(value)}</div>
-    </div>
-  );
-}
-
-function InputBox({ label, value, onChange, placeholder, disabled }: any) {
-  return (
-    <label className="block">
-      <div className="text-sm font-bold text-slate-600 mb-1">{label}</div>
-      <input
-        value={value}
-        disabled={disabled}
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full border rounded-xl px-4 py-3 disabled:bg-slate-50"
-      />
-    </label>
-  );
-}
-
 function Th({ children }: any) {
-  return (
-    <th className="text-left p-3 font-bold text-slate-600 whitespace-nowrap">
-      {children}
-    </th>
-  );
+  return <th className="text-left p-3 font-bold text-slate-600 whitespace-nowrap">{children}</th>;
 }
 
 function Td({ children, bold }: any) {
-  return (
-    <td className={`p-3 whitespace-nowrap ${bold ? "font-bold" : ""}`}>{children}</td>
-  );
+  return <td className={`p-3 whitespace-nowrap ${bold ? "font-bold" : ""}`}>{children}</td>;
 }
 
-function num(v: any) {
-  return Number(v || 0).toLocaleString("vi-VN");
+function up(v?: string) {
+  return String(v || "").trim().toUpperCase();
+}
+
+function makeKey(r: ReasonRow) {
+  return `${r.reason_l1_id || ""}__${r.reason_l2_id || ""}`;
 }
