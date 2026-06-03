@@ -48,6 +48,9 @@ const PAGE_SIZE = 30;
 
 export default function DashboardPage() {
   const router = useRouter();
+
+  // dashboardRef: toàn bộ phần hiển thị trên web
+  // exportRef: chỉ vùng sẽ xuất PNG/copy PNG = Header + KPI + Chart, không gồm bảng VTKV/CNKD
   const dashboardRef = useRef<HTMLDivElement | null>(null);
   const exportRef = useRef<HTMLDivElement | null>(null);
 
@@ -69,6 +72,12 @@ export default function DashboardPage() {
     }
 
     const u = JSON.parse(userText);
+
+    if (u?.must_change_password === true) {
+      router.push("/change-password");
+      return;
+    }
+
     setUser(u);
 
     if (String(u.role).toUpperCase() === "VTKV") {
@@ -85,18 +94,17 @@ export default function DashboardPage() {
   async function loadData(token: string) {
     setLoading(true);
 
-    try {
-      const res = await fetch(
-        `/api/proxy?action=getCurrentStatus&token=${encodeURIComponent(token)}`
-      );
-      const data = await res.json();
+    const res = await fetch(
+      `/api/proxy?action=getCurrentStatus&token=${encodeURIComponent(token)}`
+    );
 
-      if (data.status === "OK") {
-        setRows(data.data || []);
-      }
-    } finally {
-      setLoading(false);
+    const data = await res.json();
+
+    if (data.status === "OK") {
+      setRows(data.data || []);
     }
+
+    setLoading(false);
   }
 
   const role = String(user?.role || "").toUpperCase();
@@ -307,14 +315,17 @@ export default function DashboardPage() {
         <Nav label="Danh sách thuê bao" onClick={() => router.push("/subscribers")} />
         <Nav label="Import dữ liệu" onClick={() => router.push("/import")} />
         <Nav label="Cấu hình lý do" onClick={() => router.push("/reason-config")} />
-        <Nav label="Nhật ký cập nhật" />
+        <Nav label="Nhật ký cập nhật" onClick={() => router.push("/logs")} />
 
-        <div className="absolute bottom-6 left-5 right-5 text-sm">
+        <div className="mt-4 pt-4 border-t border-slate-200 text-sm">
           <div className="font-black">{user?.full_name || "User"}</div>
-          <div className="text-slate-500">
+          <div className="text-slate-500 mb-3">
             {user?.role} | {user?.scope_code}
           </div>
-          <button onClick={logout} className="text-red-600 font-bold mt-4">
+          <button
+            onClick={logout}
+            className="w-full text-left px-4 py-3 rounded-xl font-bold text-red-600 hover:bg-red-50"
+          >
             Đăng xuất
           </button>
         </div>
@@ -357,27 +368,38 @@ export default function DashboardPage() {
               ))}
             </select>
 
-            <button
-              onClick={() => exportDashboardPNG("download")}
-              disabled={exporting}
-              className="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold disabled:opacity-50"
-            >
-              {exporting ? "Đang xuất..." : "Tải PNG"}
-            </button>
+            {role !== "CNKD" && (
+              <>
+                <button
+                  onClick={() => exportDashboardPNG("download")}
+                  disabled={exporting}
+                  className="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold disabled:opacity-50"
+                >
+                  {exporting ? "Đang xuất..." : "Tải PNG"}
+                </button>
 
-            <button
-              onClick={() => exportDashboardPNG("copy")}
-              disabled={exporting}
-              className="px-4 py-2 rounded-xl bg-green-600 text-white font-bold disabled:opacity-50"
-            >
-              Copy PNG
-            </button>
+                <button
+                  onClick={() => exportDashboardPNG("copy")}
+                  disabled={exporting}
+                  className="px-4 py-2 rounded-xl bg-green-600 text-white font-bold disabled:opacity-50"
+                >
+                  Copy PNG
+                </button>
+              </>
+            )}
           </div>
         </header>
 
         <div className="p-6">
           {loading ? (
             <div className="bg-white rounded-2xl p-8 shadow">Đang tải dữ liệu...</div>
+          ) : role === "CNKD" ? (
+            <CnkdQuickDashboard
+              user={user}
+              activeMonth={activeMonth}
+              monthStats={monthStats}
+              goList={goList}
+            />
           ) : (
             <div ref={dashboardRef} data-export-root className="bg-white p-4">
               <div ref={exportRef} className="bg-white p-4">
@@ -386,7 +408,7 @@ export default function DashboardPage() {
                     Báo cáo FTTH Recovery - {selectedVTKV === "ALL" ? "Toàn HNI" : selectedVTKV}
                   </h2>
                   <p className="text-sm text-slate-500">
-                    Tháng báo cáo: {activeMonth} | Thời điểm xuất:{" "}
+                    Tháng báo cáo: {activeMonth} | Thời điểm xuất: {" "}
                     {new Date().toLocaleString("vi-VN")}
                   </p>
                 </div>
@@ -648,7 +670,7 @@ export default function DashboardPage() {
                 <div className="flex justify-between items-center mb-5">
                   <h2 className="font-black text-xl">Thống kê theo CNKD</h2>
 
-                  <div className="flex items-center gap-3 text-sm">
+                  <div className="flex items-center gap-3 text-sm no-export">
                     <button
                       onClick={() => setCnkdPage((p) => Math.max(1, p - 1))}
                       disabled={cnkdPage <= 1}
@@ -678,6 +700,56 @@ export default function DashboardPage() {
         </div>
       </section>
     </main>
+  );
+}
+
+function CnkdQuickDashboard({ user, activeMonth, monthStats, goList }: any) {
+  return (
+    <div className="max-w-5xl mx-auto">
+      <div className="mb-5">
+        <h2 className="text-2xl font-black">Dashboard CNKD</h2>
+        <p className="text-sm text-slate-500">
+          {user?.full_name || user?.username || "CNKD"} | Tháng báo cáo: {activeMonth}
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-6">
+        <MainCard
+          title="Tạm ngưng Tn"
+          value={monthStats.total}
+          subtitle={`Tháng ${activeMonth}`}
+          color={COLORS.blue}
+          reasons={{}}
+          extra={[
+            ["Đã tiếp xúc", monthStats.contacted],
+            ["Đã khôi phục", monthStats.recovered],
+            ["Đã đóng việc", monthStats.closed],
+          ]}
+          onClick={() => goList("all")}
+        />
+
+        <MainCard
+          title="Tồn chưa tiếp xúc"
+          value={monthStats.notContacted}
+          subtitle="Bấm để gọi điện và cập nhật nguyên nhân"
+          color={COLORS.purple}
+          reasons={{}}
+          extra={[
+            ["> 7 ngày", monthStats.over7],
+            ["> 15 ngày", monthStats.over15],
+            ["Đang xử lý", monthStats.pending],
+          ]}
+          onClick={() => goList("not_contacted")}
+        />
+      </div>
+
+      <section className="bg-white rounded-2xl shadow p-5 border border-slate-100">
+        <h3 className="font-black text-lg mb-2">Hướng dẫn thao tác</h3>
+        <p className="text-sm text-slate-600 leading-6">
+          Chọn card <b>Tồn chưa tiếp xúc</b> để mở danh sách thuê bao. Trên điện thoại, bấm <b>Gọi điện</b> để gọi khách hàng, sau đó bấm <b>Cập nhật nguyên nhân</b>. Nếu thuê bao chưa có số điện thoại, hệ thống sẽ yêu cầu nhập bổ sung trước khi lưu.
+        </p>
+      </section>
+    </div>
   );
 }
 

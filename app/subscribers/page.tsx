@@ -60,6 +60,7 @@ export default function SubscribersPage() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const [form, setForm] = useState({
+    phone: "",
     contact_status: "CONTACTED",
     reason_l1_id: "",
     reason_l2_id: "",
@@ -198,6 +199,7 @@ export default function SubscribersPage() {
     setMessage("");
 
     setForm({
+      phone: row.phone || "",
       contact_status: row.latest_contact_status || "CONTACTED",
       reason_l1_id: row.latest_reason_l1 || "",
       reason_l2_id: row.latest_reason_l2 || "",
@@ -216,6 +218,11 @@ export default function SubscribersPage() {
 
     if (norm(selected.latest_workflow_status) === "COMPLETED") {
       setMessage("Thuê bao đã đóng việc, không được cập nhật tiếp");
+      return;
+    }
+
+    if (!normalizePhoneText(form.phone)) {
+      setMessage("Thuê bao chưa có số điện thoại. Vui lòng nhập bổ sung số điện thoại trước khi cập nhật.");
       return;
     }
 
@@ -243,6 +250,7 @@ export default function SubscribersPage() {
           token,
           account: selected.account,
           ...form,
+          phone: normalizePhoneText(form.phone),
         }),
       });
 
@@ -542,6 +550,39 @@ export default function SubscribersPage() {
             </div>
 
             <div className="p-4 md:p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Field label="Số điện thoại KH">
+                <input
+                  className="input"
+                  value={form.phone}
+                  placeholder="Nhập SĐT nếu thuê bao chưa có"
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      phone: e.target.value,
+                    })
+                  }
+                />
+              </Field>
+
+              {normalizePhoneText(form.phone) && (
+                <div className="flex items-end">
+                  <a
+                    href={`tel:${normalizePhoneText(form.phone)}`}
+                    className="w-full rounded-lg bg-green-600 text-white px-5 py-3 font-bold text-center"
+                  >
+                    Gọi ngay
+                  </a>
+                </div>
+              )}
+
+              {!normalizePhoneText(form.phone) && (
+                <div className="flex items-end">
+                  <div className="w-full rounded-lg bg-yellow-50 text-yellow-800 px-4 py-3 text-sm font-semibold">
+                    Thuê bao chưa có SĐT, bắt buộc nhập bổ sung trước khi lưu.
+                  </div>
+                </div>
+              )}
+
               <Field label="Trạng thái tiếp xúc">
                 <select
                   className="input"
@@ -980,16 +1021,35 @@ function MobileSubscriberCard({
         <div className="text-sm font-bold text-slate-800">{reasonText}</div>
       </div>
 
-      <button
-        type="button"
-        disabled={isDone}
-        onClick={() => onUpdate(row)}
-        className={`mt-4 w-full rounded-xl text-white font-black py-3 active:scale-[0.99] ${
-          isDone ? "bg-gray-400" : "bg-blue-600"
-        }`}
-      >
-        {isDone ? "Đã đóng" : "Cập nhật"}
-      </button>
+      <div className="mt-4 grid grid-cols-1 gap-2">
+        {row.phone ? (
+          <a
+            href={`tel:${row.phone}`}
+            className="w-full rounded-xl bg-green-600 text-white font-black py-3 text-center active:scale-[0.99]"
+          >
+            Gọi điện
+          </a>
+        ) : (
+          <button
+            type="button"
+            onClick={() => onUpdate(row)}
+            className="w-full rounded-xl bg-yellow-500 text-white font-black py-3 active:scale-[0.99]"
+          >
+            Bổ sung SĐT
+          </button>
+        )}
+
+        <button
+          type="button"
+          disabled={isDone}
+          onClick={() => onUpdate(row)}
+          className={`w-full rounded-xl text-white font-black py-3 active:scale-[0.99] ${
+            isDone ? "bg-gray-400" : "bg-blue-600"
+          }`}
+        >
+          {isDone ? "Đã đóng" : "Cập nhật nguyên nhân"}
+        </button>
+      </div>
     </article>
   );
 }
@@ -1041,6 +1101,14 @@ function formatShortDate(v?: string) {
     return `${d}/${m}/${y}`;
   }
   return s;
+}
+
+function normalizePhoneText(v?: string) {
+  let p = String(v || "").trim();
+  if (!p) return "";
+  p = p.replace(/[^\d]/g, "");
+  if (p.length === 9 && p.charAt(0) !== "0") p = "0" + p;
+  return p;
 }
 
 function norm(v?: string) {
