@@ -1,0 +1,98 @@
+HUONG DAN TICH HOP MOBILE UI
+
+1. Tao thu muc:
+app/components/mobile
+
+2. Copy 5 file vao thu muc tren:
+- MobileDrawer.tsx
+- MobileHeader.tsx
+- MobileFilter.tsx
+- SubscriberCard.tsx
+- ResponsiveSubscriberList.tsx
+
+3. Trong app/subscribers/page.tsx import:
+import { useMemo, useState } from "react";
+import MobileDrawer from "../components/mobile/MobileDrawer";
+import MobileHeader from "../components/mobile/MobileHeader";
+import MobileFilter from "../components/mobile/MobileFilter";
+import ResponsiveSubscriberList from "../components/mobile/ResponsiveSubscriberList";
+
+4. Them state:
+const [menuOpen, setMenuOpen] = useState(false);
+const [keyword, setKeyword] = useState("");
+const [statusFilter, setStatusFilter] = useState("ALL");
+const [vtkvFilter, setVtkvFilter] = useState("ALL");
+
+5. Them VTKV options:
+const vtkvOptions = useMemo(() => {
+  return Array.from(new Set(rows.map((r:any) => r.vtkv).filter(Boolean))).sort();
+}, [rows]);
+
+6. Them filteredRows:
+const filteredRows = useMemo(() => {
+  const k = keyword.trim().toLowerCase();
+
+  return rows.filter((r:any) => {
+    const text = [
+      r.vtkv,
+      r.cnkd,
+      r.account,
+      r.phone,
+      r.suspend_date,
+      r.latest_reason_l1_name,
+      r.latest_reason_l2_name,
+      r.latest_contact_status,
+      r.latest_workflow_status,
+    ].join(" ").toLowerCase();
+
+    const okKeyword = !k || text.includes(k);
+    const okVtkv = vtkvFilter === "ALL" || r.vtkv === vtkvFilter;
+
+    const wf = String(r.latest_workflow_status || "NEW").toUpperCase();
+    const cs = String(r.latest_contact_status || "").toUpperCase();
+    const rr = String(r.latest_recovery_result || "").toUpperCase();
+
+    let okStatus = true;
+    if (statusFilter === "NEW") okStatus = wf === "NEW";
+    if (statusFilter === "NOT_CONTACTED") okStatus = cs !== "CONTACTED";
+    if (statusFilter === "CONTACTED") okStatus = cs === "CONTACTED";
+    if (statusFilter === "RECOVERED") okStatus = rr === "RECOVERED";
+    if (statusFilter === "COMPLETED") okStatus = wf === "COMPLETED";
+
+    return okKeyword && okVtkv && okStatus;
+  });
+}, [rows, keyword, vtkvFilter, statusFilter]);
+
+7. Dat o dau JSX:
+<MobileHeader
+  title="Danh sách thuê bao"
+  subtitle={`${user?.full_name || ""} | ${user?.role || ""}`}
+  total={filteredRows.length}
+  onMenuClick={() => setMenuOpen(true)}
+/>
+
+<MobileDrawer
+  open={menuOpen}
+  onClose={() => setMenuOpen(false)}
+  user={user}
+  active="subscribers"
+/>
+
+8. Dat truoc danh sach:
+<MobileFilter
+  keyword={keyword}
+  onKeywordChange={setKeyword}
+  status={statusFilter}
+  onStatusChange={setStatusFilter}
+  vtkv={vtkvFilter}
+  onVtkvChange={setVtkvFilter}
+  vtkvOptions={vtkvOptions}
+/>
+
+9. Thay bang hien tai bang:
+<ResponsiveSubscriberList
+  rows={filteredRows}
+  onUpdate={(row) => openUpdateModal(row)}
+/>
+
+Neu ham update cua anh ten khac, thay openUpdateModal(row) bang ham hien co.

@@ -57,6 +57,7 @@ export default function SubscribersPage() {
   const [selected, setSelected] = useState<Subscriber | null>(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const [form, setForm] = useState({
     contact_status: "CONTACTED",
@@ -325,9 +326,37 @@ export default function SubscribersPage() {
   const isClosed =
     selected && norm(selected.latest_workflow_status) === "COMPLETED";
 
+  function goMobile(path: string) {
+    setMobileMenuOpen(false);
+    router.push(path);
+  }
+
+  function logoutMobile() {
+    localStorage.removeItem("ftth_token");
+    localStorage.removeItem("ftth_user");
+    setMobileMenuOpen(false);
+    router.push("/login");
+  }
+
+
   return (
-    <main className="min-h-screen bg-gray-100 p-8">
-      <div className="rounded-3xl bg-gradient-to-r from-[#007f73] via-[#009688] to-[#00a896] text-white p-6 shadow-xl mb-6">
+    <main className="min-h-screen bg-gray-100 p-3 md:p-8">
+      <MobileHeader
+        title={getFilterTitle()}
+        subtitle={`${user?.full_name || ""} | ${user?.role || ""} | ${user?.scope_code || ""}`}
+        total={filteredRows.length}
+        onMenuClick={() => setMobileMenuOpen(true)}
+      />
+
+      <MobileDrawer
+        open={mobileMenuOpen}
+        user={user}
+        onClose={() => setMobileMenuOpen(false)}
+        onGo={goMobile}
+        onLogout={logoutMobile}
+      />
+
+      <div className="hidden md:block rounded-3xl bg-gradient-to-r from-[#007f73] via-[#009688] to-[#00a896] text-white p-6 shadow-xl mb-6">
         <div className="flex justify-between items-center">
           <div>
             <p className="uppercase tracking-[0.25em] text-sm text-white/80">
@@ -351,7 +380,18 @@ export default function SubscribersPage() {
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl shadow p-6 mb-6">
+      <MobileFilter
+        keyword={keyword}
+        onKeywordChange={setKeyword}
+        filter={filter}
+        onFilterChange={setFilter}
+        filterVTKV={filterVTKV}
+        onFilterVTKVChange={setFilterVTKV}
+        rows={rows}
+        onExport={exportCsv}
+      />
+
+      <div className="hidden md:block bg-white rounded-2xl shadow p-6 mb-6">
         <div className="flex gap-4 items-center justify-between">
           <input
             value={keyword}
@@ -374,7 +414,26 @@ export default function SubscribersPage() {
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl shadow overflow-hidden">
+      <div className="md:hidden space-y-3 mt-4">
+        {loading ? (
+          <div className="bg-white rounded-2xl shadow p-6">Đang tải dữ liệu...</div>
+        ) : filteredRows.length === 0 ? (
+          <div className="bg-white rounded-2xl shadow p-6 text-center text-gray-500">
+            Không có dữ liệu
+          </div>
+        ) : (
+          filteredRows.map((r, idx) => (
+            <MobileSubscriberCard
+              key={`${r.account}-${idx}`}
+              row={r}
+              index={idx}
+              onUpdate={openUpdate}
+            />
+          ))
+        )}
+      </div>
+
+      <div className="hidden md:block bg-white rounded-2xl shadow overflow-hidden">
         {loading ? (
           <div className="p-8">Đang tải dữ liệu...</div>
         ) : (
@@ -456,8 +515,8 @@ export default function SubscribersPage() {
       </div>
 
       {selected && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-6">
-          <div className="bg-white rounded-2xl shadow-2xl w-[760px] max-h-[90vh] overflow-auto">
+        <div className="fixed inset-0 bg-black/40 flex items-end md:items-center justify-center p-0 md:p-6 z-[1000]">
+          <div className="bg-white rounded-t-3xl md:rounded-2xl shadow-2xl w-full md:w-[760px] max-h-[95vh] overflow-auto">
             <div className="p-6 border-b">
               <h2 className="text-2xl font-bold">
                 Cập nhật kết quả khôi phục
@@ -482,7 +541,7 @@ export default function SubscribersPage() {
               )}
             </div>
 
-            <div className="p-6 grid grid-cols-2 gap-4">
+            <div className="p-4 md:p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
               <Field label="Trạng thái tiếp xúc">
                 <select
                   className="input"
@@ -634,7 +693,7 @@ export default function SubscribersPage() {
                 />
               </Field>
 
-              <div className="col-span-2">
+              <div className="md:col-span-2">
                 <label className="block font-semibold mb-2">Ghi chú</label>
                 <textarea
                   className="input min-h-[100px]"
@@ -649,16 +708,16 @@ export default function SubscribersPage() {
               </div>
 
               {message && (
-                <div className="col-span-2 bg-yellow-100 text-yellow-800 rounded-lg p-3">
+                <div className="md:col-span-2 bg-yellow-100 text-yellow-800 rounded-lg p-3">
                   {message}
                 </div>
               )}
             </div>
 
-            <div className="p-6 border-t flex justify-end gap-3">
+            <div className="p-4 md:p-6 border-t flex flex-col-reverse md:flex-row md:justify-end gap-3">
               <button
                 onClick={() => setSelected(null)}
-                className="border rounded-lg px-5 py-2 font-semibold"
+                className="border rounded-lg px-5 py-3 md:py-2 font-semibold"
               >
                 Đóng
               </button>
@@ -666,7 +725,7 @@ export default function SubscribersPage() {
               <button
                 onClick={saveRecovery}
                 disabled={saving || Boolean(isClosed)}
-                className="bg-blue-600 text-white rounded-lg px-5 py-2 font-semibold disabled:bg-gray-400"
+                className="bg-blue-600 text-white rounded-lg px-5 py-3 md:py-2 font-semibold disabled:bg-gray-400"
               >
                 {saving ? "Đang lưu..." : "Lưu cập nhật"}
               </button>
@@ -676,6 +735,312 @@ export default function SubscribersPage() {
       )}
     </main>
   );
+}
+
+
+function MobileHeader({
+  title,
+  subtitle,
+  total,
+  onMenuClick,
+}: {
+  title: string;
+  subtitle?: string;
+  total: number;
+  onMenuClick: () => void;
+}) {
+  return (
+    <header className="md:hidden sticky top-0 z-40 bg-gradient-to-r from-[#007f73] via-[#009688] to-[#00a896] text-white rounded-2xl shadow-xl mb-4">
+      <div className="px-4 py-3 flex items-center gap-3">
+        <button
+          type="button"
+          onClick={onMenuClick}
+          className="w-11 h-11 rounded-xl bg-white/15 font-black text-2xl"
+          aria-label="Mở menu"
+        >
+          ☰
+        </button>
+
+        <div className="flex-1 min-w-0">
+          <div className="text-[11px] tracking-[0.18em] font-black opacity-80">
+            FTTH RECOVERY
+          </div>
+          <h1 className="font-black text-lg leading-tight truncate">
+            {title}
+          </h1>
+          {subtitle && (
+            <p className="text-xs opacity-90 truncate">{subtitle}</p>
+          )}
+        </div>
+
+        <div className="text-right shrink-0">
+          <div className="text-[10px] opacity-80">Tổng</div>
+          <div className="text-2xl font-black">{total}</div>
+        </div>
+      </div>
+    </header>
+  );
+}
+
+function MobileDrawer({
+  open,
+  user,
+  onClose,
+  onGo,
+  onLogout,
+}: {
+  open: boolean;
+  user: any;
+  onClose: () => void;
+  onGo: (path: string) => void;
+  onLogout: () => void;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[999] md:hidden">
+      <button
+        type="button"
+        aria-label="Đóng menu"
+        onClick={onClose}
+        className="absolute inset-0 bg-black/40"
+      />
+
+      <aside className="absolute left-0 top-0 h-full w-[82vw] max-w-[340px] bg-white shadow-2xl p-5">
+        <div className="flex items-start justify-between mb-6">
+          <div>
+            <div className="text-xs tracking-[0.25em] text-emerald-600 font-black">
+              FTTH
+            </div>
+            <div className="text-xl font-black text-slate-900">Recovery</div>
+            <div className="text-xs text-slate-500 mt-1">
+              {user?.full_name || user?.username || "User"} | {user?.role || ""}
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-10 h-10 rounded-xl bg-slate-100 font-black"
+          >
+            ×
+          </button>
+        </div>
+
+        <nav className="space-y-2">
+          <MobileNav label="Dashboard" onClick={() => onGo("/dashboard")} />
+          <MobileNav active label="Danh sách thuê bao" onClick={() => onGo("/subscribers")} />
+          <MobileNav label="Import dữ liệu" onClick={() => onGo("/import")} />
+          <MobileNav label="Cấu hình lý do" onClick={() => onGo("/reason-config")} />
+          <MobileNav label="Đổi mật khẩu" onClick={() => onGo("/change-password")} />
+        </nav>
+
+        <div className="mt-5 pt-5 border-t border-slate-200">
+          <button
+            type="button"
+            onClick={onLogout}
+            className="w-full px-4 py-3 rounded-xl bg-red-600 text-white font-black text-left"
+          >
+            Đăng xuất
+          </button>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function MobileNav({ label, active, onClick }: any) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`w-full text-left px-4 py-3 rounded-xl font-bold ${
+        active
+          ? "bg-emerald-50 text-emerald-700"
+          : "text-slate-700 hover:bg-slate-50"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+function MobileFilter({
+  keyword,
+  onKeywordChange,
+  filter,
+  onFilterChange,
+  filterVTKV,
+  onFilterVTKVChange,
+  rows,
+  onExport,
+}: {
+  keyword: string;
+  onKeywordChange: (v: string) => void;
+  filter: string;
+  onFilterChange: (v: string) => void;
+  filterVTKV: string;
+  onFilterVTKVChange: (v: string) => void;
+  rows: Subscriber[];
+  onExport: () => void;
+}) {
+  const vtkvOptions = Array.from(
+    new Set(rows.map((r) => r.vtkv).filter(Boolean))
+  ).sort();
+
+  return (
+    <section className="md:hidden bg-white rounded-2xl shadow p-4 space-y-3">
+      <input
+        value={keyword}
+        onChange={(e) => onKeywordChange(e.target.value)}
+        placeholder="Tìm Account, SĐT, CNKD..."
+        className="w-full border border-slate-300 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-emerald-500"
+      />
+
+      <div className="grid grid-cols-2 gap-3">
+        <select
+          value={filterVTKV}
+          onChange={(e) => onFilterVTKVChange(e.target.value)}
+          className="border border-slate-300 rounded-xl px-3 py-3 bg-white"
+        >
+          <option value="ALL">Tất cả VTKV</option>
+          {vtkvOptions.map((x) => (
+            <option key={x} value={x}>
+              {x}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={filter}
+          onChange={(e) => onFilterChange(e.target.value)}
+          className="border border-slate-300 rounded-xl px-3 py-3 bg-white"
+        >
+          <option value="all">Tất cả</option>
+          <option value="not_contacted">Chưa tiếp xúc</option>
+          <option value="contacted">Đã tiếp xúc</option>
+          <option value="pending">Đang xử lý</option>
+          <option value="recovered">Đã khôi phục</option>
+          <option value="failed">Không khôi phục</option>
+          <option value="closed">Đã đóng việc</option>
+        </select>
+      </div>
+
+      <button
+        type="button"
+        onClick={onExport}
+        className="w-full rounded-xl bg-green-600 text-white font-black py-3"
+      >
+        Export CSV
+      </button>
+    </section>
+  );
+}
+
+function MobileSubscriberCard({
+  row,
+  index,
+  onUpdate,
+}: {
+  row: Subscriber;
+  index: number;
+  onUpdate: (row: Subscriber) => void;
+}) {
+  const isDone = norm(row.latest_workflow_status) === "COMPLETED";
+  const reasonText =
+    row.latest_reason_l2_name || row.latest_reason_l1_name || "Chưa cập nhật";
+
+  return (
+    <article className="bg-white rounded-2xl shadow border border-slate-100 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-xs text-slate-400 font-bold">
+            #{index + 1} · {row.vtkv || ""}
+          </div>
+          <h3 className="font-black text-base text-slate-900 mt-1 break-all">
+            {row.account || ""}
+          </h3>
+          <div className="text-xs text-slate-500 mt-1 break-all">
+            CNKD: <b>{row.cnkd || ""}</b>
+          </div>
+        </div>
+
+        <MobileStatusBadge row={row} />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 mt-4 text-sm">
+        <MobileInfo label="SĐT" value={row.phone || "—"} />
+        <MobileInfo label="Ngày TN" value={formatShortDate(row.suspend_date) || "—"} />
+        <MobileInfo label="Số ngày TN" value={String(row.days_suspend || "—")} />
+        <MobileInfo label="Tiếp xúc" value={showContact(row.latest_contact_status)} />
+      </div>
+
+      <div className="mt-4 rounded-xl bg-slate-50 p-3">
+        <div className="text-xs text-slate-500 font-bold mb-1">Nguyên nhân</div>
+        <div className="text-sm font-bold text-slate-800">{reasonText}</div>
+      </div>
+
+      <button
+        type="button"
+        disabled={isDone}
+        onClick={() => onUpdate(row)}
+        className={`mt-4 w-full rounded-xl text-white font-black py-3 active:scale-[0.99] ${
+          isDone ? "bg-gray-400" : "bg-blue-600"
+        }`}
+      >
+        {isDone ? "Đã đóng" : "Cập nhật"}
+      </button>
+    </article>
+  );
+}
+
+function MobileStatusBadge({ row }: { row: Subscriber }) {
+  const workflow = norm(row.latest_workflow_status);
+  const result = norm(row.latest_recovery_result);
+  const contact = norm(row.latest_contact_status);
+
+  let label = "Chưa tiếp xúc";
+  let cls = "bg-orange-50 text-orange-700";
+
+  if (contact === "CONTACTED") {
+    label = "Đã tiếp xúc";
+    cls = "bg-blue-50 text-blue-700";
+  }
+
+  if (result === "RECOVERED") {
+    label = "Đã khôi phục";
+    cls = "bg-green-50 text-green-700";
+  }
+
+  if (workflow === "COMPLETED") {
+    label = "Đã đóng việc";
+    cls = "bg-slate-100 text-slate-700";
+  }
+
+  return (
+    <span className={`shrink-0 px-3 py-2 rounded-full text-xs font-black ${cls}`}>
+      {label}
+    </span>
+  );
+}
+
+function MobileInfo({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl bg-slate-50 p-3">
+      <div className="text-[11px] text-slate-500 font-bold">{label}</div>
+      <div className="font-black text-slate-900 mt-1 break-all">{value}</div>
+    </div>
+  );
+}
+
+function formatShortDate(v?: string) {
+  if (!v) return "";
+  const s = String(v);
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    const [y, m, d] = s.slice(0, 10).split("-");
+    return `${d}/${m}/${y}`;
+  }
+  return s;
 }
 
 function norm(v?: string) {
