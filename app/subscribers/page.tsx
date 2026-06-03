@@ -53,6 +53,9 @@ export default function SubscribersPage() {
 
   const [loading, setLoading] = useState(true);
   const [keyword, setKeyword] = useState("");
+  const [debouncedKeyword, setDebouncedKeyword] = useState("");
+  const [page, setPage] = useState(1);
+  const pageSize = 30;
 
   const [selected, setSelected] = useState<Subscriber | null>(null);
   const [saving, setSaving] = useState(false);
@@ -92,6 +95,19 @@ export default function SubscribersPage() {
     loadData(savedToken);
   }, [router]);
 
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedKeyword(keyword);
+      setPage(1);
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [keyword]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [filter, filterVTKV]);
+
   async function loadData(authToken: string) {
     setLoading(true);
 
@@ -119,7 +135,7 @@ export default function SubscribersPage() {
   }
 
   const filteredRows = useMemo(() => {
-    const k = keyword.trim().toLowerCase();
+    const k = debouncedKeyword.trim().toLowerCase();
 
     return rows.filter((r) => {
       if (
@@ -163,7 +179,18 @@ export default function SubscribersPage() {
         String(r.latest_reason_l2_name || "").toLowerCase().includes(k)
       );
     });
-  }, [rows, keyword, filter, filterVTKV]);
+  }, [rows, debouncedKeyword, filter, filterVTKV]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+
+  const pagedRows = useMemo(() => {
+    const safePage = Math.min(Math.max(page, 1), totalPages);
+    const start = (safePage - 1) * pageSize;
+    return filteredRows.slice(start, start + pageSize);
+  }, [filteredRows, page, totalPages]);
+
+  const pageStart = filteredRows.length === 0 ? 0 : (Math.min(page, totalPages) - 1) * pageSize + 1;
+  const pageEnd = Math.min(Math.min(page, totalPages) * pageSize, filteredRows.length);
 
   const reasonL1List = useMemo(() => {
     const map = new Map<string, string>();
@@ -430,11 +457,11 @@ export default function SubscribersPage() {
             Không có dữ liệu
           </div>
         ) : (
-          filteredRows.map((r, idx) => (
+          pagedRows.map((r, idx) => (
             <MobileSubscriberCard
               key={`${r.account}-${idx}`}
               row={r}
-              index={idx}
+              index={pageStart + idx - 1}
               onUpdate={openUpdate}
             />
           ))
@@ -474,12 +501,12 @@ export default function SubscribersPage() {
                     </td>
                   </tr>
                 ) : (
-                  filteredRows.map((r, idx) => (
+                  pagedRows.map((r, idx) => (
                     <tr
                       key={`${r.account}-${idx}`}
                       className="border-t hover:bg-gray-50"
                     >
-                      <Td>{idx + 1}</Td>
+                      <Td>{pageStart + idx}</Td>
                       <Td>{r.vtkv}</Td>
                       <Td>{r.cnkd}</Td>
                       <Td bold>{r.account}</Td>
@@ -521,6 +548,18 @@ export default function SubscribersPage() {
           </div>
         )}
       </div>
+
+      {!loading && filteredRows.length > 0 && (
+        <PaginationBar
+          page={Math.min(page, totalPages)}
+          totalPages={totalPages}
+          pageStart={pageStart}
+          pageEnd={pageEnd}
+          total={filteredRows.length}
+          onPrev={() => setPage((p) => Math.max(1, p - 1))}
+          onNext={() => setPage((p) => Math.min(totalPages, p + 1))}
+        />
+      )}
 
       {selected && (
         <div className="fixed inset-0 bg-black/40 flex items-end md:items-center justify-center p-0 md:p-6 z-[1000]">
@@ -779,6 +818,57 @@ export default function SubscribersPage() {
 }
 
 
+
+function PaginationBar({
+  page,
+  totalPages,
+  pageStart,
+  pageEnd,
+  total,
+  onPrev,
+  onNext,
+}: {
+  page: number;
+  totalPages: number;
+  pageStart: number;
+  pageEnd: number;
+  total: number;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
+  return (
+    <div className="mt-4 bg-white rounded-2xl shadow p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+      <div className="text-sm text-slate-600 font-semibold">
+        Hiển thị <b>{pageStart}</b> - <b>{pageEnd}</b> / <b>{total}</b> thuê bao
+      </div>
+
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onPrev}
+          disabled={page <= 1}
+          className="flex-1 md:flex-none rounded-xl border px-4 py-3 md:py-2 font-bold disabled:opacity-40"
+        >
+          Trước
+        </button>
+
+        <div className="px-4 py-2 font-black text-slate-700">
+          {page}/{totalPages}
+        </div>
+
+        <button
+          type="button"
+          onClick={onNext}
+          disabled={page >= totalPages}
+          className="flex-1 md:flex-none rounded-xl border px-4 py-3 md:py-2 font-bold disabled:opacity-40"
+        >
+          Sau
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function MobileHeader({
   title,
   subtitle,
@@ -990,7 +1080,6 @@ function MobileSubscriberCard({
   const isDone = norm(row.latest_workflow_status) === "COMPLETED";
   const reasonText =
     row.latest_reason_l2_name || row.latest_reason_l1_name || "Chưa cập nhật";
-  const phone = normalizePhoneText(row.phone);
 
   return (
     <article className="bg-white rounded-2xl shadow border border-slate-100 p-4">
@@ -1011,25 +1100,10 @@ function MobileSubscriberCard({
       </div>
 
       <div className="grid grid-cols-2 gap-3 mt-4 text-sm">
-        <MobileInfo
-          label="Ngày TN"
-          value={formatShortDate(row.suspend_date) || "—"}
-        />
-
-        <MobileInfo
-          label="Số ngày TN"
-          value={String(row.days_suspend || "—")}
-        />
-
-        <MobileInfo
-          label="Tiếp xúc"
-          value={showContact(row.latest_contact_status)}
-        />
-
-        <MobileInfo
-          label="Kết quả"
-          value={showResult(row.latest_recovery_result) || "Chưa cập nhật"}
-        />
+        <MobileInfo label="SĐT" value={row.phone || "—"} />
+        <MobileInfo label="Ngày TN" value={formatShortDate(row.suspend_date) || "—"} />
+        <MobileInfo label="Số ngày TN" value={String(row.days_suspend || "—")} />
+        <MobileInfo label="Tiếp xúc" value={showContact(row.latest_contact_status)} />
       </div>
 
       <div className="mt-4 rounded-xl bg-slate-50 p-3">
@@ -1038,9 +1112,9 @@ function MobileSubscriberCard({
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-2">
-        {phone ? (
+        {row.phone ? (
           <a
-            href={`tel:${phone}`}
+            href={`tel:${row.phone}`}
             className="w-full rounded-xl bg-green-600 text-white font-black py-3 text-center active:scale-[0.99]"
           >
             Gọi điện
