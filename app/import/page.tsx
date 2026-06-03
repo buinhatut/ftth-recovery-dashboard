@@ -43,10 +43,10 @@ export default function ImportPage() {
     const s = String(v || "").trim();
     const x = s.toLowerCase().replace(/\s+/g, "");
 
-    if (x === "khyc") return "KHYC";
-    if (x === "nợcước" || x === "nocuoc") return "Nợ cước";
-    if (x === "khyc+nc" || x === "khycnc" || x === "khyc+nợcước") {
-      return "KHYC+NC";
+    if (x === "khyc" || x==="Chặn 1C KHYC") return "Chặn 1C KHYC";
+    if (x === "nợcước" || x === "Chặn 1C nợ cước") return "Chặn 1C nợ cước";
+    if (x === "khyc+nc" || x === "Chặn 1C KHYC, chặn 1C nợ cước" || x === "Chặn 1C KHYC, chặn 1C nợ cước") {
+      return "Chặn 1C KHYC, chặn 1C nợ cước";
     }
 
     return s;
