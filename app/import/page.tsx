@@ -39,16 +39,63 @@ export default function ImportPage() {
     }
   }, [router]);
 
-  function normalizeReason(v: string) {
+  function normalizeReason(v: any) {
     const s = String(v || "").trim();
-    const x = s.toLowerCase().replace(/\s+/g, "");
 
-    if (x === "khyc" || x==="Chặn 1C KHYC") return "Chặn 1C KHYC";
-    if (x === "nợcước" || x === "Chặn 1C nợ cước") return "Chặn 1C nợ cước";
-    if (x === "khyc+nc" || x === "Chặn 1C KHYC, chặn 1C nợ cước" || x === "Chặn 1C KHYC, chặn 1C nợ cước") {
-      return "Chặn 1C KHYC, chặn 1C nợ cước";
+    if (!s) return "";
+
+    const x = s
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\s+/g, "")
+      .replace(/_/g, "")
+      .replace(/-/g, "");
+
+    // Chỉ quy đổi KHYC+NC khi dữ liệu ghi rõ KHYC+NC hoặc KHYC NC.
+    // Không suy luận từ "Chặn 1C KHYC".
+    if (
+      x.includes("khyc+nc") ||
+      x.includes("khycnc") ||
+      x.includes("khyc+nocuoc") ||
+      x.includes("khycnocuoc")
+    ) {
+      return "KHYC+NC";
     }
 
+    if (x.includes("khyc")) {
+      return "KHYC";
+    }
+
+    if (x.includes("nocuoc") || x.includes("cuoc")) {
+      return "Nợ cước";
+    }
+
+    return "";
+  }
+
+  function normalizePhone(v: any) {
+    let p = String(v || "").trim();
+
+    if (!p) return "";
+
+    p = p.replace(/[^\d]/g, "");
+
+    // Excel làm mất số 0 đầu: 979010061 -> 0979010061
+    if (p.length === 9 && p.charAt(0) !== "0") {
+      p = "0" + p;
+    }
+
+    return p;
+  }
+
+  function normalizeDate(v: any) {
+    const s = String(v || "").trim();
+
+    if (!s) return "";
+
+    // Giữ nguyên format để Code.gs xử lý tiếp.
+    // Hỗ trợ các dạng: 02-06-26 18:47, 01-06-2026, 2026-06-01
     return s;
   }
 
@@ -64,9 +111,9 @@ export default function ImportPage() {
           vtkv: String(r.vtkv || "").trim(),
           cnkd: String(r.cnkd || "").trim(),
           account: String(r.account || "").trim(),
-          phone: String(r.phone || "").trim(),
-          suspend_date: String(r.suspend_date || "").trim(),
-          suspend_reason: normalizeReason(r.suspend_reason || ""),
+          phone: normalizePhone(r.phone),
+          suspend_date: normalizeDate(r.suspend_date),
+          suspend_reason: normalizeReason(r.suspend_reason),
         }));
 
         setRows(data);
@@ -80,9 +127,9 @@ export default function ImportPage() {
   function downloadTemplate() {
     const csv = [
       "vtkv,cnkd,account,phone,suspend_date,suspend_reason",
-      "TTI,DUCHV_HNI_CNKD,h004_gftth_001,,01-06-2026,KHYC",
-      "TTI,DUCHV_HNI_CNKD,h004_gftth_002,,01-06-2026,Nợ cước",
-      "TTI,DUCHV_HNI_CNKD,h004_gftth_003,,01-06-2026,KHYC+NC",
+      "TTI,DUCHV_HNI_CNKD,h004_gftth_001,979010061,02-06-26 18:47,Chặn 1C KHYC",
+      "TTI,DUCHV_HNI_CNKD,h004_gftth_002,01652305539,01-06-26 18:59,Chặn 1C nợ cước",
+      "TTI,DUCHV_HNI_CNKD,h004_gftth_003,0975351984,01-06-2026,KHYC+NC",
     ].join("\n");
 
     const blob = new Blob(["\ufeff" + csv], {
@@ -191,16 +238,16 @@ export default function ImportPage() {
           <pre className="text-sm whitespace-pre-wrap">
 {`vtkv,cnkd,account,phone,suspend_date,suspend_reason
 
-TTI,DUCHV_HNI_CNKD,h004_gftth_001,,01-06-2026,KHYC
-TTI,DUCHV_HNI_CNKD,h004_gftth_002,,01-06-2026,Nợ cước
-TTI,DUCHV_HNI_CNKD,h004_gftth_003,,01-06-2026,KHYC+NC`}
+DDA,VANVT_HNI_CNKD,h004_ftth_namhvttnv,979010061,02-06-26 18:47,Chặn 1C KHYC
+NTLM,HANGLTT_HNI_CNKD,h004_gftth_baont,01652305539,01-06-26 18:59,Chặn 1C nợ cước
+LBN,LIENT3_HNI_CNKD,h004_gftth_dungnn,0975351984,01-06-2026,KHYC+NC`}
           </pre>
 
           <div className="mt-3 text-sm">
-            Giá trị hợp lệ:
-            <b> KHYC </b>,
-            <b> Nợ cước </b>,
-            <b> KHYC+NC </b>
+            Hệ thống tự quy đổi:
+            <b> Chặn 1C KHYC → KHYC</b>,
+            <b> Chặn 1C nợ cước → Nợ cước</b>,
+            <b> KHYC+NC → KHYC+NC</b>.
           </div>
         </div>
 
