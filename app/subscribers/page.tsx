@@ -990,6 +990,7 @@ function MobileSubscriberCard({
   const isDone = norm(row.latest_workflow_status) === "COMPLETED";
   const reasonText =
     row.latest_reason_l2_name || row.latest_reason_l1_name || "Chưa cập nhật";
+  const phone = normalizePhoneText(row.phone);
 
   return (
     <article className="bg-white rounded-2xl shadow border border-slate-100 p-4">
@@ -1010,10 +1011,25 @@ function MobileSubscriberCard({
       </div>
 
       <div className="grid grid-cols-2 gap-3 mt-4 text-sm">
-        <MobileInfo label="SĐT" value={row.phone || "—"} />
-        <MobileInfo label="Ngày TN" value={formatShortDate(row.suspend_date) || "—"} />
-        <MobileInfo label="Số ngày TN" value={String(row.days_suspend || "—")} />
-        <MobileInfo label="Tiếp xúc" value={showContact(row.latest_contact_status)} />
+        <MobileInfo
+          label="Ngày TN"
+          value={formatShortDate(row.suspend_date) || "—"}
+        />
+
+        <MobileInfo
+          label="Số ngày TN"
+          value={String(row.days_suspend || "—")}
+        />
+
+        <MobileInfo
+          label="Tiếp xúc"
+          value={showContact(row.latest_contact_status)}
+        />
+
+        <MobileInfo
+          label="Kết quả"
+          value={showResult(row.latest_recovery_result) || "Chưa cập nhật"}
+        />
       </div>
 
       <div className="mt-4 rounded-xl bg-slate-50 p-3">
@@ -1022,9 +1038,9 @@ function MobileSubscriberCard({
       </div>
 
       <div className="mt-4 grid grid-cols-1 gap-2">
-        {row.phone ? (
+        {phone ? (
           <a
-            href={`tel:${row.phone}`}
+            href={`tel:${phone}`}
             className="w-full rounded-xl bg-green-600 text-white font-black py-3 text-center active:scale-[0.99]"
           >
             Gọi điện
