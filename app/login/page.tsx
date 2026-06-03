@@ -18,7 +18,8 @@ export default function LoginPage() {
 
     try {
       const res = await fetch(
-        `/api/proxy?action=login&username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`
+        `/api/proxy?action=login&username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`,
+        { cache: "no-store" }
       );
 
       const data = await res.json();
@@ -30,6 +31,11 @@ export default function LoginPage() {
 
       localStorage.setItem("ftth_token", data.token);
       localStorage.setItem("ftth_user", JSON.stringify(data.user));
+
+      if (data.user?.must_change_password === true) {
+        router.push("/change-password");
+        return;
+      }
 
       router.push("/dashboard");
     } catch (err: any) {
@@ -77,7 +83,7 @@ export default function LoginPage() {
         <button
           type="submit"
           disabled={loading}
-          className="w-full bg-black text-white rounded-lg p-3 font-bold"
+          className="w-full bg-black text-white rounded-lg p-3 font-bold disabled:opacity-50"
         >
           {loading ? "Đang đăng nhập..." : "Đăng nhập"}
         </button>
