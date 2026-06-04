@@ -1,109 +1,233 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { toBlob, toPng } from "html-to-image";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  ComposedChart,
+  Legend,
+  Line,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
 type Row = {
-  vtkv?: string;
-  cnkd?: string;
-  account?: string;
-  phone?: string;
+  vtkv: string;
+  cnkd: string;
+  account: string;
+  phone: string;
   suspend_date?: string;
   suspend_month?: string;
-  suspend_year?: string;
-  suspend_day?: string;
-  days_suspend?: string | number;
   suspend_reason?: string;
-
   latest_contact_status?: string;
-  latest_reason_l1?: string;
-  latest_reason_l2?: string;
   latest_reason_l1_name?: string;
   latest_reason_l2_name?: string;
   latest_recovery_result?: string;
   latest_workflow_status?: string;
-  latest_note?: string;
-  latest_updated_by?: string;
-  latest_updated_at?: string;
-};
-
-type User = {
-  username?: string;
-  full_name?: string;
-  role?: string;
-  scope_code?: string;
-  must_change_password?: boolean | string;
+  days_suspend?: number | string;
 };
 
 const COLORS = {
-  blue: "text-blue-600",
-  purple: "text-purple-600",
-  green: "text-green-600",
-  orange: "text-orange-600",
-  red: "text-red-600",
-  slate: "text-slate-700",
+  blue: "#2563eb",
+  green: "#16a34a",
+  orange: "#f97316",
+  red: "#dc2626",
+  purple: "#7c3aed",
+  teal: "#0f766e",
 };
+
+const PAGE_SIZE = 30;
 
 export default function DashboardPage() {
   const router = useRouter();
+  const dashboardRef = useRef<HTMLDivElement | null>(null);
+  const exportRef = useRef<HTMLDivElement | null>(null);
 
-  const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState("");
+  const [user, setUser] = useState<any>(null);
   const [rows, setRows] = useState<Row[]>([]);
+  const [selectedMonth, setSelectedMonth] = useState("ALL");
+  const [selectedVTKV, setSelectedVTKV] = useState("ALL");
   const [loading, setLoading] = useState(true);
+  const [cnkdPage, setCnkdPage] = useState(1);
+  const [exporting, setExporting] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  const [selectedVTKV, setSelectedVTKV] = useState("ALL");
-  const [selectedMonth, setSelectedMonth] = useState("ALL");
-
   useEffect(() => {
-    const savedToken = localStorage.getItem("ftth_token");
-    const savedUser = localStorage.getItem("ftth_user");
+    const token = localStorage.getItem("ftth_token");
+    const userText = localStorage.getItem("ftth_user");
 
-    if (!savedToken || !savedUser) {
+    if (!token || !userText) {
       router.push("/login");
       return;
     }
 
-    const parsedUser = JSON.parse(savedUser);
+    const u = JSON.parse(userText);
+    setUser(u);
 
-    if (
-      parsedUser?.must_change_password === true ||
-      String(parsedUser?.must_change_password || "").toUpperCase() === "TRUE"
-    ) {
-      router.push("/change-password");
-      return;
+    if (String(u.role).toUpperCase() === "VTKV") {
+      setSelectedVTKV(String(u.scope_code || ""));
     }
 
-    setToken(savedToken);
-    setUser(parsedUser);
-
-    loadData(savedToken);
+    loadData(token);
   }, [router]);
 
-  async function loadData(authToken: string) {
+  useEffect(() => {
+    setCnkdPage(1);
+  }, [selectedMonth, selectedVTKV]);
+
+  async function loadData(token: string) {
     setLoading(true);
 
     try {
       const res = await fetch(
-        `/api/proxy?action=getCurrentStatus&token=${encodeURIComponent(authToken)}`,
-        {
-          cache: "no-store",
-        }
+        `/api/proxy?action=getCurrentStatus&token=${encodeURIComponent(token)}`
       );
-
       const data = await res.json();
 
       if (data.status === "OK") {
         setRows(data.data || []);
-      } else {
-        alert(data.message || "Không tải được dashboard");
       }
-    } catch (err: any) {
-      alert("Lỗi tải dashboard: " + err.message);
     } finally {
       setLoading(false);
     }
+  }
+
+  const role = String(user?.role || "").toUpperCase();
+
+  const monthList = useMemo(() => {
+    const s = new Set<string>();
+    rows.forEach((r) => r.suspend_month && s.add(r.suspend_month));
+    return Array.from(s).sort().reverse();
+  }, [rows]);
+
+  const activeMonth = useMemo(() => {
+    if (selectedMonth !== "ALL") return selectedMonth;
+    if (monthList.length > 0) return monthList[0];
+    return getCurrentMonth();
+  }, [selectedMonth, monthList]);
+
+  const vtkvList = useMemo(() => {
+    const s = new Set<string>();
+    rows.forEach((r) => r.vtkv && s.add(r.vtkv));
+    return Array.from(s).sort();
+  }, [rows]);
+
+  const viewRows = useMemo(() => {
+    let data = rows;
+
+    if (role === "VTKV") {
+      data = data.filter((r) => up(r.vtkv) === up(user?.scope_code));
+    } else if (role === "CNKD") {
+      data = data.filter((r) => up(r.cnkd) === up(user?.scope_code));
+    } else if (selectedVTKV !== "ALL") {
+      data = data.filter((r) => up(r.vtkv) === up(selectedVTKV));
+    }
+
+    if (selectedMonth !== "ALL") {
+      data = data.filter((r) => String(r.suspend_month || "") === selectedMonth);
+    }
+
+    return data;
+  }, [rows, role, user, selectedVTKV, selectedMonth]);
+
+  const today = getToday();
+  const yesterday = getYesterday();
+
+  const todayRows = viewRows.filter((r) => dateOnly(r.suspend_date) === today);
+  const yesterdayRows = viewRows.filter((r) => dateOnly(r.suspend_date) === yesterday);
+
+  const monthStats = useMemo(() => buildStats(viewRows), [viewRows]);
+  const todayStats = useMemo(() => buildStats(todayRows), [todayRows]);
+  const yesterdayStats = useMemo(() => buildStats(yesterdayRows), [yesterdayRows]);
+
+  const reasonMonth = useMemo(() => suspendReasonCount(viewRows), [viewRows]);
+  const reasonToday = useMemo(() => suspendReasonCount(todayRows), [todayRows]);
+  const reasonYesterday = useMemo(() => suspendReasonCount(yesterdayRows), [yesterdayRows]);
+
+  const trendData = useMemo(() => {
+    const [year, month] = activeMonth.split("-").map(Number);
+    const daysInMonth = new Date(year, month, 0).getDate();
+
+    const data = Array.from({ length: daysInMonth }, (_, i) => ({
+      day: i + 1,
+      suspend: 0,
+      contact: 0,
+      recovery: 0,
+      close: 0,
+    }));
+
+    viewRows.forEach((r) => {
+      const d = parseLocalDate(r.suspend_date);
+      if (!d) return;
+
+      const y = d.getFullYear();
+      const m = d.getMonth() + 1;
+      const day = d.getDate();
+
+      if (y !== year || m !== month) return;
+      if (day < 1 || day > daysInMonth) return;
+
+      const x = data[day - 1];
+
+      x.suspend += 1;
+
+      if (up(r.latest_contact_status) === "CONTACTED") x.contact += 1;
+      if (up(r.latest_recovery_result) === "RECOVERED") x.recovery += 1;
+      if (up(r.latest_workflow_status) === "COMPLETED") x.close += 1;
+    });
+
+    return data;
+  }, [viewRows, activeMonth]);
+
+  const byVTKV = useMemo(() => groupBy(viewRows, "vtkv"), [viewRows]);
+  const byCNKD = useMemo(() => groupBy(viewRows, "cnkd"), [viewRows]);
+
+  const cnkdTotalPages = Math.max(1, Math.ceil(byCNKD.length / PAGE_SIZE));
+
+  const cnkdPageData = useMemo(() => {
+    const start = (cnkdPage - 1) * PAGE_SIZE;
+    return byCNKD.slice(start, start + PAGE_SIZE);
+  }, [byCNKD, cnkdPage]);
+
+  const vtkvSuspendChart = useMemo(() => {
+    return byVTKV
+      .map((x) => ({ name: x.name, value: x.total }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 15);
+  }, [byVTKV]);
+
+  const suspendReasonChart = useMemo(() => {
+    return [
+      { name: "KHYC", value: reasonMonth.KHYC || 0, color: COLORS.blue },
+      { name: "Nợ cước", value: reasonMonth["Nợ cước"] || 0, color: COLORS.orange },
+      { name: "KHYC+NC", value: reasonMonth["KHYC+NC"] || 0, color: COLORS.purple },
+    ];
+  }, [reasonMonth]);
+
+  const reasonL1Chart = useMemo(() => {
+    return topCount(viewRows, "latest_reason_l1_name", 10);
+  }, [viewRows]);
+
+  const reasonL2Chart = useMemo(() => {
+    return topCount(viewRows, "latest_reason_l2_name", 10);
+  }, [viewRows]);
+
+  function goList(filter: string) {
+    const params = new URLSearchParams();
+    params.set("filter", filter);
+
+    if (selectedVTKV !== "ALL") params.set("vtkv", selectedVTKV);
+    if (selectedMonth !== "ALL") params.set("month", selectedMonth);
+
+    router.push(`/subscribers?${params.toString()}`);
   }
 
   function logout() {
@@ -117,124 +241,67 @@ export default function DashboardPage() {
     router.push(path);
   }
 
-  const role = norm(user?.role);
-  const isCNKD = role === "CNKD";
+  async function exportDashboardPNG(mode: "download" | "copy") {
+    const element = exportRef.current;
+    if (!element) return;
 
-  const monthList = useMemo(() => {
-    const list = Array.from(
-      new Set(
-        rows
-          .map((r) => String(r.suspend_month || "").trim())
-          .filter(Boolean)
-      )
-    ).sort((a, b) => b.localeCompare(a));
+    setExporting(true);
 
-    return list;
-  }, [rows]);
+    try {
+      await new Promise((r) => setTimeout(r, 500));
 
-  const activeMonth = useMemo(() => {
-    if (selectedMonth !== "ALL") return selectedMonth;
-    return monthList[0] || "";
-  }, [monthList, selectedMonth]);
+      const filename = `ftth-kpi-chart-${activeMonth}-${
+        selectedVTKV === "ALL" ? "ALL" : selectedVTKV
+      }.png`;
 
-  const vtkvList = useMemo(() => {
-    return Array.from(
-      new Set(
-        rows
-          .map((r) => String(r.vtkv || "").trim().toUpperCase())
-          .filter(Boolean)
-      )
-    ).sort();
-  }, [rows]);
+      const filter = (node: HTMLElement) => {
+        return !node.classList?.contains("no-export");
+      };
 
-  const filteredRows = useMemo(() => {
-    return rows.filter((r) => {
-      const okMonth =
-        selectedMonth === "ALL" ||
-        String(r.suspend_month || "").trim() === selectedMonth;
+      const exportOptions = {
+        cacheBust: true,
+        pixelRatio: 2,
+        backgroundColor: "#ffffff",
+        filter,
+        style: {
+          background: "#ffffff",
+          color: "#0f172a",
+        },
+      };
 
-      const okVTKV =
-        selectedVTKV === "ALL" ||
-        String(r.vtkv || "").trim().toUpperCase() === selectedVTKV;
+      if (mode === "copy" && navigator.clipboard && (window as any).ClipboardItem) {
+        const blob = await toBlob(element, exportOptions);
 
-      return okMonth && okVTKV;
-    });
-  }, [rows, selectedMonth, selectedVTKV]);
+        if (!blob) {
+          throw new Error("Không tạo được PNG blob");
+        }
 
-  const stats = useMemo(() => {
-    const total = filteredRows.length;
+        await navigator.clipboard.write([
+          new (window as any).ClipboardItem({
+            "image/png": blob,
+          }),
+        ]);
 
-    const contacted = filteredRows.filter(
-      (r) => norm(r.latest_contact_status) === "CONTACTED"
-    ).length;
+        alert("Đã copy ảnh Dashboard. Anh có thể Paste vào WhatsApp.");
+        return;
+      }
 
-    const recovered = filteredRows.filter(
-      (r) => norm(r.latest_recovery_result) === "RECOVERED"
-    ).length;
+      const dataUrl = await toPng(element, exportOptions);
 
-    const failed = filteredRows.filter((r) => {
-      const v = norm(r.latest_recovery_result);
-      return v === "FAILED" || v === "NOT_RECOVERED";
-    }).length;
+      const link = document.createElement("a");
+      link.download = filename;
+      link.href = dataUrl;
+      link.click();
+    } catch (err: any) {
+      console.error(err);
 
-    const closed = filteredRows.filter(
-      (r) => norm(r.latest_workflow_status) === "COMPLETED"
-    ).length;
-
-    const notContacted = Math.max(0, total - contacted);
-    const pending = Math.max(0, total - recovered - failed);
-
-    const over7 = filteredRows.filter((r) => Number(r.days_suspend || 0) > 7).length;
-    const over15 = filteredRows.filter((r) => Number(r.days_suspend || 0) > 15).length;
-
-    const contactRate = total ? Math.round((contacted / total) * 100) : 0;
-    const recoveryRate = total ? Math.round((recovered / total) * 100) : 0;
-
-    const reasonMap: Record<string, number> = {};
-
-    filteredRows.forEach((r) => {
-      const key = String(r.suspend_reason || "Không xác định").trim() || "Không xác định";
-      reasonMap[key] = (reasonMap[key] || 0) + 1;
-    });
-
-    return {
-      total,
-      contacted,
-      notContacted,
-      recovered,
-      failed,
-      pending,
-      closed,
-      over7,
-      over15,
-      contactRate,
-      recoveryRate,
-      reasonMap,
-    };
-  }, [filteredRows]);
-
-  const topVTKV = useMemo(() => {
-    const map = new Map<string, number>();
-
-    filteredRows.forEach((r) => {
-      const k = String(r.vtkv || "Không xác định").trim().toUpperCase() || "Không xác định";
-      map.set(k, (map.get(k) || 0) + 1);
-    });
-
-    return Array.from(map.entries())
-      .map(([name, value]) => ({ name, value }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 12);
-  }, [filteredRows]);
-
-  function goList(filter: string) {
-    const params = new URLSearchParams();
-
-    if (filter) params.set("filter", filter);
-    if (selectedVTKV !== "ALL") params.set("vtkv", selectedVTKV);
-    if (selectedMonth !== "ALL") params.set("month", selectedMonth);
-
-    router.push(`/subscribers?${params.toString()}`);
+      alert(
+        "Không export được PNG:\n\n" +
+          (err?.message || JSON.stringify(err))
+      );
+    } finally {
+      setExporting(false);
+    }
   }
 
   return (
@@ -243,44 +310,34 @@ export default function DashboardPage() {
         open={mobileMenuOpen}
         user={user}
         active="dashboard"
+        role={role}
         onClose={() => setMobileMenuOpen(false)}
         onGo={goMobile}
         onLogout={logout}
       />
 
-      <aside className="w-[250px] bg-white border-r border-slate-200 min-h-screen p-5 hidden lg:block">
-        <div className="text-xl font-black text-blue-600 mb-8">
-          FTTH Recovery
-        </div>
+      <aside className="w-[250px] bg-white border-r border-slate-200 min-h-screen p-5 hidden lg:block relative">
+        <div className="text-xl font-black text-blue-600 mb-8">FTTH Recovery</div>
 
         <Nav active label="Dashboard V2" onClick={() => router.push("/dashboard")} />
         <Nav label="Danh sách thuê bao" onClick={() => router.push("/subscribers")} />
+        <Nav label="Import dữ liệu" onClick={() => router.push("/import")} />
+        <Nav label="Cấu hình lý do" onClick={() => router.push("/reason-config")} />
+        <Nav label="Nhật ký cập nhật" />
 
-        {role === "CN" && (
-          <>
-            <Nav label="Import dữ liệu" onClick={() => router.push("/import")} />
-            <Nav label="Cấu hình lý do" onClick={() => router.push("/reason-config")} />
-          </>
-        )}
-
-        <Nav label="Đổi mật khẩu" onClick={() => router.push("/change-password")} />
-
-        <div className="mt-4 pt-4 border-t border-slate-200 text-sm">
-          <div className="font-black">{user?.full_name || user?.username || "User"}</div>
+        <div className="absolute bottom-6 left-5 right-5 text-sm">
+          <div className="font-black">{user?.full_name || "User"}</div>
           <div className="text-slate-500">
             {user?.role} | {user?.scope_code}
           </div>
-
-          <button
-            onClick={logout}
-            className="w-full text-left px-4 py-3 rounded-xl font-bold text-red-600 hover:bg-red-50 mt-3"
-          >
+          <button onClick={logout} className="text-red-600 font-bold mt-4">
             Đăng xuất
           </button>
         </div>
       </aside>
 
       <section className="flex-1 min-w-0">
+
         <header className="lg:hidden sticky top-0 z-40 bg-gradient-to-r from-[#007f73] via-[#009688] to-[#00a896] text-white rounded-b-3xl shadow-xl">
           <div className="px-4 py-3 flex items-center gap-3">
             <button
@@ -306,7 +363,7 @@ export default function DashboardPage() {
 
             <div className="text-right shrink-0">
               <div className="text-[10px] opacity-80">Tổng TN</div>
-              <div className="text-2xl font-black">{stats.total}</div>
+              <div className="text-2xl font-black">{monthStats.total}</div>
             </div>
           </div>
         </header>
@@ -315,7 +372,7 @@ export default function DashboardPage() {
           <div>
             <h1 className="font-black text-xl">Dashboard tạm ngưng tháng</h1>
             <p className="text-xs text-slate-500">
-              KPI tạm ngưng, tồn chưa tiếp xúc và kết quả khôi phục
+              Điều hành ngày N, N-1, lý do tạm ngưng và nguyên nhân cấp 1/cấp 2
             </p>
           </div>
 
@@ -339,7 +396,7 @@ export default function DashboardPage() {
               onChange={(e) => setSelectedVTKV(e.target.value)}
               className="inputBox"
             >
-              <option value="ALL">Tất cả VTKV</option>
+              {role === "CN" && <option value="ALL">Tất cả VTKV</option>}
               {vtkvList.map((v) => (
                 <option key={v} value={v}>
                   {v}
@@ -348,22 +405,331 @@ export default function DashboardPage() {
             </select>
 
             <button
-              onClick={() => token && loadData(token)}
-              className="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold"
+              onClick={() => exportDashboardPNG("download")}
+              disabled={exporting}
+              className="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold disabled:opacity-50"
             >
-              Làm mới
+              {exporting ? "Đang xuất..." : "Tải PNG"}
+            </button>
+
+            <button
+              onClick={() => exportDashboardPNG("copy")}
+              disabled={exporting}
+              className="px-4 py-2 rounded-xl bg-green-600 text-white font-bold disabled:opacity-50"
+            >
+              Copy PNG
             </button>
           </div>
         </header>
 
-        <div className="p-4 lg:p-6">
+        <div className="hidden lg:block p-6">
           {loading ? (
-            <div className="bg-white rounded-2xl p-8 shadow">
-              Đang tải dữ liệu...
+            <div className="bg-white rounded-2xl p-8 shadow">Đang tải dữ liệu...</div>
+          ) : (
+            <div ref={dashboardRef} data-export-root className="bg-white p-4">
+              <div ref={exportRef} className="bg-white p-4">
+                <div className="mb-5">
+                  <h2 className="text-2xl font-black">
+                    Báo cáo FTTH Recovery - {selectedVTKV === "ALL" ? "Toàn HNI" : selectedVTKV}
+                  </h2>
+                  <p className="text-sm text-slate-500">
+                    Tháng báo cáo: {activeMonth} | Thời điểm xuất:{" "}
+                    {new Date().toLocaleString("vi-VN")}
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7 gap-5 mb-6">
+                  <MainCard
+                    title="Tạm ngưng tháng"
+                    value={monthStats.total}
+                    subtitle={selectedMonth === "ALL" ? `Tháng ${activeMonth}` : `Tháng ${selectedMonth}`}
+                    color={COLORS.blue}
+                    reasons={reasonMonth}
+                    onClick={() => goList("all")}
+                  />
+
+                  <MainCard
+                    title="Tạm ngưng ngày N"
+                    value={todayStats.total}
+                    subtitle={formatDateVi(today)}
+                    color={COLORS.red}
+                    delta={todayStats.total - yesterdayStats.total}
+                    reasons={reasonToday}
+                    onClick={() => goList("today")}
+                  />
+
+                  <MainCard
+                    title="Tạm ngưng N-1"
+                    value={yesterdayStats.total}
+                    subtitle={formatDateVi(yesterday)}
+                    color={COLORS.orange}
+                    reasons={reasonYesterday}
+                    extra={[
+                      ["Đã tiếp xúc", yesterdayStats.contacted],
+                      ["Đã khôi phục", yesterdayStats.recovered],
+                      ["% tiếp xúc", `${yesterdayStats.contactRate}%`],
+                    ]}
+                    onClick={() => goList("yesterday")}
+                  />
+
+                  <MainCard
+                    title="Tồn chưa tiếp xúc"
+                    value={monthStats.notContacted}
+                    subtitle="Cần điều hành xử lý"
+                    color={COLORS.purple}
+                    extra={[
+                      ["Đang xử lý", monthStats.pending],
+                      ["> 7 ngày", monthStats.over7],
+                      ["> 15 ngày", monthStats.over15],
+                      ["Đã đóng việc", monthStats.closed],
+                    ]}
+                    onClick={() => goList("not_contacted")}
+                  />
+
+                  <MainCard
+                    title="Đã tiếp xúc"
+                    value={monthStats.contacted}
+                    subtitle={`${monthStats.contactRate}% trên tổng TN`}
+                    color={COLORS.green}
+                    extra={[
+                      ["Tổng tạm ngưng", monthStats.total],
+                      ["Chưa tiếp xúc", monthStats.notContacted],
+                    ]}
+                    onClick={() => goList("contacted")}
+                  />
+
+                  <MainCard
+                    title="Đã khôi phục"
+                    value={monthStats.recovered}
+                    subtitle="Thuê bao đã khôi phục"
+                    color={COLORS.teal}
+                    extra={[
+                      ["Đang xử lý", monthStats.pending],
+                      ["Đã đóng việc", monthStats.closed],
+                    ]}
+                    onClick={() => goList("recovered")}
+                  />
+
+                  <MainCard
+                    title="Tỷ lệ khôi phục"
+                    value={`${monthStats.recoveryRate}%`}
+                    subtitle={`${num(monthStats.recovered)} / ${num(monthStats.total)} thuê bao`}
+                    color={COLORS.purple}
+                    extra={[
+                      ["Đã khôi phục", monthStats.recovered],
+                      ["Chưa khôi phục", monthStats.total - monthStats.recovered],
+                    ]}
+                    onClick={() => goList("recovered")}
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 xl:grid-cols-4 gap-6 mb-6">
+                  <section className="xl:col-span-3 bg-white rounded-2xl shadow p-6">
+                    <div className="flex justify-between items-center mb-5">
+                      <div>
+                        <h2 className="font-black text-xl">
+                          Xu hướng tạm ngưng theo ngày trong tháng
+                        </h2>
+                        <p className="text-sm text-slate-500">
+                          Cột cố định theo ngày 1 → cuối tháng | Line: tiếp xúc, khôi phục, đóng việc
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="h-[340px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <ComposedChart
+                          data={trendData}
+                          margin={{ top: 20, right: 20, left: 20, bottom: 20 }}
+                          barCategoryGap="80%"
+                          barGap={2}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                          <XAxis
+                            dataKey="day"
+                            interval={0}
+                            tick={{ fontSize: 11 }}
+                            tickFormatter={(v) => String(v).padStart(2, "0")}
+                          />
+                          <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+                          <Tooltip
+                            formatter={(value: any, name: any) => [num(value), name]}
+                            labelFormatter={(label) => `Ngày ${label}`}
+                          />
+                          <Legend />
+                          <Bar
+                            dataKey="suspend"
+                            name="Tạm ngưng"
+                            fill={COLORS.blue}
+                            barSize={12}
+                            radius={[3, 3, 0, 0]}
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="contact"
+                            name="Tiếp xúc"
+                            stroke={COLORS.green}
+                            strokeWidth={3}
+                            dot={{ r: 3 }}
+                            activeDot={{ r: 5 }}
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="recovery"
+                            name="Khôi phục"
+                            stroke={COLORS.orange}
+                            strokeWidth={3}
+                            dot={{ r: 3 }}
+                            activeDot={{ r: 5 }}
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="close"
+                            name="Đóng việc"
+                            stroke={COLORS.purple}
+                            strokeWidth={3}
+                            dot={{ r: 3 }}
+                            activeDot={{ r: 5 }}
+                          />
+                        </ComposedChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </section>
+
+                  <section className="bg-white rounded-2xl shadow p-6">
+                    <h2 className="font-black text-xl mb-5">Tổng quan tháng</h2>
+
+                    <Summary label="Tạm ngưng tháng" value={monthStats.total} />
+                    <Summary label="Tạm ngưng ngày N" value={todayStats.total} />
+                    <Summary label="Tạm ngưng N-1" value={yesterdayStats.total} />
+                    <Summary label="Đã tiếp xúc" value={monthStats.contacted} />
+                    <Summary label="Đã khôi phục" value={monthStats.recovered} />
+                    <Summary label="Tỷ lệ khôi phục" value={`${monthStats.recoveryRate}%`} />
+                    <Summary label="Chưa tiếp xúc" value={monthStats.notContacted} />
+                    <Summary label="Tồn > 7 ngày" value={monthStats.over7} />
+                    <Summary label="Tồn > 15 ngày" value={monthStats.over15} />
+                  </section>
+                </div>
+
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
+                  <ChartCard title="Top VTKV tạm ngưng trong tháng">
+                    <VerticalBarChart
+                      data={vtkvSuspendChart}
+                      color={COLORS.red}
+                      dataKey="value"
+                      name="Tạm ngưng"
+                    />
+                  </ChartCard>
+
+                  <section className="bg-white rounded-2xl shadow p-6">
+                    <h2 className="font-black text-xl mb-5">
+                      Cơ cấu nguyên nhân tạm ngưng
+                    </h2>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+                      <div className="h-[320px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={suspendReasonChart}
+                              dataKey="value"
+                              nameKey="name"
+                              innerRadius={70}
+                              outerRadius={110}
+                              label
+                            >
+                              {suspendReasonChart.map((entry) => (
+                                <Cell key={entry.name} fill={entry.color} />
+                              ))}
+                            </Pie>
+                            <Tooltip />
+                            <Legend />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      </div>
+
+                      <div className="space-y-4">
+                        {suspendReasonChart.map((r) => (
+                          <ProgressLine
+                            key={r.name}
+                            label={r.name}
+                            value={r.value}
+                            total={monthStats.total}
+                            color={r.color}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  </section>
+                </div>
+
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
+                  <ChartCard title="Nguyên nhân cấp 1">
+                    <VerticalBarChart
+                      data={reasonL1Chart}
+                      color={COLORS.teal}
+                      dataKey="value"
+                      name="Nguyên nhân cấp 1"
+                    />
+                  </ChartCard>
+
+                  <ChartCard title="Nguyên nhân cấp 2">
+                    <VerticalBarChart
+                      data={reasonL2Chart}
+                      color={COLORS.orange}
+                      dataKey="value"
+                      name="Nguyên nhân cấp 2"
+                    />
+                  </ChartCard>
+                </div>
+              </div>
+
+              {role !== "CNKD" && (
+                <section className="bg-white rounded-2xl shadow p-6 mt-6">
+                  <h2 className="font-black text-xl mb-5">Thống kê theo VTKV</h2>
+                  <StatsTable data={byVTKV} firstCol="VTKV" />
+                </section>
+              )}
+
+              <section className="bg-white rounded-2xl shadow p-6 mt-6">
+                <div className="flex justify-between items-center mb-5">
+                  <h2 className="font-black text-xl">Thống kê theo CNKD</h2>
+
+                  <div className="flex items-center gap-3 text-sm">
+                    <button
+                      onClick={() => setCnkdPage((p) => Math.max(1, p - 1))}
+                      disabled={cnkdPage <= 1}
+                      className="px-4 py-2 rounded-lg bg-slate-100 font-bold disabled:opacity-40"
+                    >
+                      Previous
+                    </button>
+
+                    <span>
+                      Trang <b>{cnkdPage}</b> / <b>{cnkdTotalPages}</b>
+                    </span>
+
+                    <button
+                      onClick={() => setCnkdPage((p) => Math.min(cnkdTotalPages, p + 1))}
+                      disabled={cnkdPage >= cnkdTotalPages}
+                      className="px-4 py-2 rounded-lg bg-slate-100 font-bold disabled:opacity-40"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+
+                <StatsTable data={cnkdPageData} firstCol="CNKD" />
+              </section>
             </div>
+          )}
+        </div>
+
+        <div className="lg:hidden p-4">
+          {loading ? (
+            <div className="bg-white rounded-2xl p-6 shadow">Đang tải dữ liệu...</div>
           ) : (
             <>
-              <div className="lg:hidden bg-white rounded-2xl shadow p-4 mb-4 grid grid-cols-2 gap-3">
+              <div className="bg-white rounded-2xl shadow p-4 mb-4 grid grid-cols-2 gap-3">
                 <select
                   value={selectedMonth}
                   onChange={(e) => setSelectedMonth(e.target.value)}
@@ -383,7 +749,7 @@ export default function DashboardPage() {
                   onChange={(e) => setSelectedVTKV(e.target.value)}
                   className="border border-slate-300 rounded-xl px-3 py-3 bg-white disabled:bg-slate-100"
                 >
-                  <option value="ALL">Tất cả VTKV</option>
+                  {role === "CN" && <option value="ALL">Tất cả VTKV</option>}
                   {vtkvList.map((v) => (
                     <option key={v} value={v}>
                       {v}
@@ -392,133 +758,57 @@ export default function DashboardPage() {
                 </select>
               </div>
 
-              <div className="mb-5">
+              <div className="mb-4">
                 <h2 className="text-2xl font-black">
                   Báo cáo FTTH Recovery - {selectedVTKV === "ALL" ? "Toàn HNI" : selectedVTKV}
                 </h2>
                 <p className="text-sm text-slate-500">
-                  Tháng báo cáo: {selectedMonth === "ALL" ? activeMonth || "ALL" : selectedMonth}
+                  Tháng báo cáo: {activeMonth}
                 </p>
               </div>
 
-              {isCNKD ? (
-                <CNKDDashboard stats={stats} goList={goList} />
-              ) : (
-                <FullDashboard stats={stats} topVTKV={topVTKV} goList={goList} />
-              )}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <MobileKpiCard
+                  title="Tạm ngưng Tn"
+                  value={monthStats.total}
+                  subtitle="Tổng thuê bao được giao"
+                  color="text-blue-600"
+                  onClick={() => goList("all")}
+                />
+
+                <MobileKpiCard
+                  title="Tồn chưa tiếp xúc"
+                  value={monthStats.notContacted}
+                  subtitle="Bấm để gọi điện và cập nhật"
+                  color="text-purple-600"
+                  onClick={() => goList("not_contacted")}
+                />
+
+                <MobileKpiCard
+                  title="Đã tiếp xúc"
+                  value={monthStats.contacted}
+                  subtitle={`${monthStats.contactRate}% trên tổng tạm ngưng`}
+                  color="text-green-600"
+                  onClick={() => goList("contacted")}
+                />
+
+                <MobileKpiCard
+                  title="Đã khôi phục"
+                  value={monthStats.recovered}
+                  subtitle={`${monthStats.recoveryRate}% trên tổng tạm ngưng`}
+                  color="text-orange-600"
+                  onClick={() => goList("recovered")}
+                />
+              </div>
             </>
           )}
         </div>
       </section>
-
-      <style jsx global>{`
-        .inputBox {
-          border: 1px solid #e2e8f0;
-          border-radius: 12px;
-          padding: 8px 12px;
-          background: white;
-          font-weight: 700;
-          outline: none;
-        }
-      `}</style>
     </main>
   );
 }
 
-function CNKDDashboard({
-  stats,
-  goList,
-}: {
-  stats: any;
-  goList: (filter: string) => void;
-}) {
-  return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-      <KpiCard
-        title="Tạm ngưng Tn"
-        value={stats.total}
-        subtitle="Tổng thuê bao được giao"
-        color={COLORS.blue}
-        onClick={() => goList("all")}
-      />
-
-      <KpiCard
-        title="Tồn chưa tiếp xúc"
-        value={stats.notContacted}
-        subtitle="Bấm để gọi điện và cập nhật"
-        color={COLORS.purple}
-        onClick={() => goList("not_contacted")}
-      />
-
-      <KpiCard
-        title="Đã tiếp xúc"
-        value={stats.contacted}
-        subtitle={`${stats.contactRate}% trên tổng tạm ngưng`}
-        color={COLORS.green}
-        onClick={() => goList("contacted")}
-      />
-
-      <KpiCard
-        title="Đã khôi phục"
-        value={stats.recovered}
-        subtitle={`${stats.recoveryRate}% trên tổng tạm ngưng`}
-        color={COLORS.orange}
-        onClick={() => goList("recovered")}
-      />
-    </div>
-  );
-}
-
-function FullDashboard({
-  stats,
-  topVTKV,
-  goList,
-}: {
-  stats: any;
-  topVTKV: { name: string; value: number }[];
-  goList: (filter: string) => void;
-}) {
-  return (
-    <>
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7 gap-4 mb-6">
-        <KpiCard title="Tạm ngưng tháng" value={stats.total} subtitle="Tổng tạm ngưng" color={COLORS.blue} onClick={() => goList("all")} />
-        <KpiCard title="Tồn chưa tiếp xúc" value={stats.notContacted} subtitle="Cần xử lý" color={COLORS.purple} onClick={() => goList("not_contacted")} />
-        <KpiCard title="Đã tiếp xúc" value={stats.contacted} subtitle={`${stats.contactRate}%`} color={COLORS.green} onClick={() => goList("contacted")} />
-        <KpiCard title="Đã khôi phục" value={stats.recovered} subtitle={`${stats.recoveryRate}%`} color={COLORS.orange} onClick={() => goList("recovered")} />
-        <KpiCard title="Đang xử lý" value={stats.pending} subtitle="Chưa có kết quả cuối" color={COLORS.slate} onClick={() => goList("pending")} />
-        <KpiCard title="Tồn > 7 ngày" value={stats.over7} subtitle="Cần ưu tiên" color={COLORS.red} onClick={() => goList("all")} />
-        <KpiCard title="Tồn > 15 ngày" value={stats.over15} subtitle="Cảnh báo cao" color={COLORS.red} onClick={() => goList("all")} />
-      </div>
-
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-        <Panel title="Top VTKV tạm ngưng trong tháng">
-          <div className="space-y-3">
-            {topVTKV.length === 0 ? (
-              <div className="text-slate-500">Không có dữ liệu</div>
-            ) : (
-              topVTKV.map((x) => (
-                <MiniBar key={x.name} label={x.name} value={x.value} max={topVTKV[0]?.value || 1} />
-              ))
-            )}
-          </div>
-        </Panel>
-
-        <Panel title="Tổng quan tháng">
-          <SummaryRow label="Tạm ngưng tháng" value={stats.total} />
-          <SummaryRow label="Chưa tiếp xúc" value={stats.notContacted} />
-          <SummaryRow label="Đã tiếp xúc" value={stats.contacted} />
-          <SummaryRow label="Đã khôi phục" value={stats.recovered} />
-          <SummaryRow label="Tỷ lệ tiếp xúc" value={`${stats.contactRate}%`} />
-          <SummaryRow label="Tỷ lệ khôi phục" value={`${stats.recoveryRate}%`} />
-          <SummaryRow label="Tồn > 7 ngày" value={stats.over7} />
-          <SummaryRow label="Tồn > 15 ngày" value={stats.over15} />
-        </Panel>
-      </div>
-    </>
-  );
-}
-
-function KpiCard({
+function MobileKpiCard({
   title,
   value,
   subtitle,
@@ -526,7 +816,7 @@ function KpiCard({
   onClick,
 }: {
   title: string;
-  value: number;
+  value: any;
   subtitle: string;
   color: string;
   onClick?: () => void;
@@ -535,89 +825,20 @@ function KpiCard({
     <button
       type="button"
       onClick={onClick}
-      className="bg-white rounded-2xl shadow p-5 text-left hover:shadow-lg active:scale-[0.99] transition"
+      className="bg-white rounded-2xl shadow p-5 text-left active:scale-[0.99] transition"
     >
       <div className="text-sm text-slate-500 font-bold">{title}</div>
-      <div className={`text-4xl font-black mt-2 ${color}`}>{value}</div>
+      <div className={`text-4xl font-black mt-2 ${color}`}>{numOrText(value)}</div>
       <div className="text-xs text-slate-500 mt-2">{subtitle}</div>
     </button>
   );
 }
 
-function Panel({ title, children }: any) {
-  return (
-    <section className="bg-white rounded-2xl shadow p-5">
-      <h3 className="font-black text-lg mb-4">{title}</h3>
-      {children}
-    </section>
-  );
-}
-
-function MiniBar({
-  label,
-  value,
-  max,
-}: {
-  label: string;
-  value: number;
-  max: number;
-}) {
-  const pct = max ? Math.max(4, Math.round((value / max) * 100)) : 0;
-
-  return (
-    <div>
-      <div className="flex justify-between text-sm font-bold mb-1">
-        <span>{label}</span>
-        <span>{value}</span>
-      </div>
-      <div className="h-3 rounded-full bg-slate-100 overflow-hidden">
-        <div
-          className="h-full rounded-full bg-blue-600"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-    </div>
-  );
-}
-
-function SummaryRow({ label, value }: { label: string; value: any }) {
-  return (
-    <div className="flex justify-between border-b border-slate-200 py-3 text-sm">
-      <span className="text-slate-600">{label}</span>
-      <b>{value}</b>
-    </div>
-  );
-}
-
-function Nav({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`w-full text-left px-4 py-3 rounded-xl font-bold mb-2 ${
-        active
-          ? "bg-blue-50 text-blue-700"
-          : "text-slate-700 hover:bg-slate-50"
-      }`}
-    >
-      {label}
-    </button>
-  );
-}
-
-
 function MobileMenu({
   open,
   user,
   active,
+  role,
   onClose,
   onGo,
   onLogout,
@@ -625,6 +846,7 @@ function MobileMenu({
   open: boolean;
   user?: any;
   active?: "dashboard" | "subscribers" | "import" | "reason-config" | "change-password";
+  role?: string;
   onClose: () => void;
   onGo: (path: string) => void;
   onLogout: () => void;
@@ -646,11 +868,7 @@ function MobileMenu({
             <div className="text-xs tracking-[0.25em] text-emerald-600 font-black">
               FTTH
             </div>
-
-            <div className="text-xl font-black text-slate-900">
-              Recovery
-            </div>
-
+            <div className="text-xl font-black text-slate-900">Recovery</div>
             <div className="text-xs text-slate-500 mt-1">
               {user?.full_name || user?.username || "User"} | {user?.role || ""}
             </div>
@@ -666,35 +884,15 @@ function MobileMenu({
         </div>
 
         <nav className="space-y-2">
-          <MobileNav
-            active={active === "dashboard"}
-            label="Dashboard"
-            onClick={() => onGo("/dashboard")}
-          />
-
-          <MobileNav
-            active={active === "subscribers"}
-            label="Danh sách thuê bao"
-            onClick={() => onGo("/subscribers")}
-          />
-
-          <MobileNav
-            active={active === "import"}
-            label="Import dữ liệu"
-            onClick={() => onGo("/import")}
-          />
-
-          <MobileNav
-            active={active === "reason-config"}
-            label="Cấu hình lý do"
-            onClick={() => onGo("/reason-config")}
-          />
-
-          <MobileNav
-            active={active === "change-password"}
-            label="Đổi mật khẩu"
-            onClick={() => onGo("/change-password")}
-          />
+          <MobileNav active={active === "dashboard"} label="Dashboard" onClick={() => onGo("/dashboard")} />
+          <MobileNav active={active === "subscribers"} label="Danh sách thuê bao" onClick={() => onGo("/subscribers")} />
+          {role === "CN" && (
+            <>
+              <MobileNav active={active === "import"} label="Import dữ liệu" onClick={() => onGo("/import")} />
+              <MobileNav active={active === "reason-config"} label="Cấu hình lý do" onClick={() => onGo("/reason-config")} />
+            </>
+          )}
+          <MobileNav active={active === "change-password"} label="Đổi mật khẩu" onClick={() => onGo("/change-password")} />
         </nav>
 
         <div className="mt-5 pt-5 border-t border-slate-200">
@@ -735,7 +933,346 @@ function MobileNav({
   );
 }
 
+function ChartCard({ title, children }: any) {
+  return (
+    <section className="bg-white rounded-2xl shadow p-6">
+      <h2 className="font-black text-xl mb-5">{title}</h2>
+      {children}
+    </section>
+  );
+}
 
-function norm(v: any) {
+function VerticalBarChart({ data, color, dataKey, name }: any) {
+  if (!data || data.length === 0) {
+    return (
+      <div className="h-[360px] flex items-center justify-center text-slate-500">
+        Chưa có dữ liệu
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-[360px]">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={data} layout="vertical" margin={{ left: 40, right: 20 }}>
+          <CartesianGrid strokeDasharray="3 3" />
+          <XAxis type="number" allowDecimals={false} />
+          <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 12 }} />
+          <Tooltip />
+          <Bar dataKey={dataKey} name={name} fill={color} radius={[0, 8, 8, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function MainCard({
+  title,
+  value,
+  subtitle,
+  color,
+  reasons,
+  extra,
+  delta,
+  onClick,
+}: any) {
+  return (
+    <button
+      onClick={onClick}
+      className="bg-white rounded-2xl shadow p-5 text-left hover:shadow-xl transition"
+    >
+      <div className="text-sm font-bold text-slate-500 uppercase">{title}</div>
+
+      <div className="text-5xl font-black mt-3" style={{ color }}>
+        {numOrText(value)}
+      </div>
+
+      <div className="text-sm text-slate-500 mt-2">{subtitle}</div>
+
+      {typeof delta === "number" && (
+        <div
+          className={`mt-3 font-black ${
+            delta > 0 ? "text-red-600" : delta < 0 ? "text-green-600" : "text-slate-500"
+          }`}
+        >
+          {delta > 0 ? "↑" : delta < 0 ? "↓" : "→"} {delta > 0 ? "+" : ""}
+          {num(delta)} so với N-1
+        </div>
+      )}
+
+      {reasons && (
+        <div className="mt-5 space-y-2">
+          <ReasonLine label="KHYC" value={reasons.KHYC || 0} color="#2563eb" />
+          <ReasonLine label="Nợ cước" value={reasons["Nợ cước"] || 0} color="#f97316" />
+          <ReasonLine label="KHYC+NC" value={reasons["KHYC+NC"] || 0} color="#7c3aed" />
+        </div>
+      )}
+
+      {extra && (
+        <div className="mt-5 space-y-2">
+          {extra.map((x: any) => (
+            <div key={x[0]} className="flex justify-between text-sm">
+              <span className="text-slate-500">{x[0]}</span>
+              <b>{numOrText(x[1])}</b>
+            </div>
+          ))}
+        </div>
+      )}
+    </button>
+  );
+}
+
+function ReasonLine({ label, value, color }: any) {
+  return (
+    <div className="flex justify-between items-center text-sm">
+      <div className="flex items-center gap-2">
+        <span className="w-3 h-3 rounded-full" style={{ background: color }} />
+        <span>{label}</span>
+      </div>
+      <b>{num(value)}</b>
+    </div>
+  );
+}
+
+function ProgressLine({ label, value, total, color }: any) {
+  return (
+    <div>
+      <div className="flex justify-between text-sm font-bold mb-1">
+        <span>{label}</span>
+        <span>
+          {num(value)} - {pct(value, total)}%
+        </span>
+      </div>
+
+      <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
+        <div
+          className="h-full rounded-full"
+          style={{ width: `${pct(value, total)}%`, background: color }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function StatsTable({ data, firstCol }: any) {
+  return (
+    <div className="overflow-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr>
+            <Th>{firstCol}</Th>
+            <Th>Tạm ngưng</Th>
+            <Th>Đã TX</Th>
+            <Th>Chưa TX</Th>
+            <Th>Khôi phục</Th>
+            <Th>Đóng việc</Th>
+            <Th>%TX</Th>
+            <Th>%KP</Th>
+            <Th>{">7 ngày"}</Th>
+            <Th>{">15 ngày"}</Th>
+          </tr>
+        </thead>
+
+        <tbody>
+          {data.map((r: any) => (
+            <tr key={r.name} className="border-t">
+              <Td bold>{r.name}</Td>
+              <Td>{num(r.total)}</Td>
+              <Td>{num(r.contacted)}</Td>
+              <Td>{num(r.notContacted)}</Td>
+              <Td>{num(r.recovered)}</Td>
+              <Td>{num(r.closed)}</Td>
+              <Td>{r.contactRate}%</Td>
+              <Td>{r.recoveryRate}%</Td>
+              <Td>{num(r.over7)}</Td>
+              <Td>{num(r.over15)}</Td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function buildStats(data: Row[]) {
+  const total = data.length;
+
+  const contacted = data.filter((r) => up(r.latest_contact_status) === "CONTACTED").length;
+  const recovered = data.filter((r) => up(r.latest_recovery_result) === "RECOVERED").length;
+  const closed = data.filter((r) => up(r.latest_workflow_status) === "COMPLETED").length;
+
+  const failed = data.filter((r) =>
+    ["FAILED", "NOT_RECOVERED"].includes(up(r.latest_recovery_result))
+  ).length;
+
+  const over7 = data.filter((r) => Number(r.days_suspend || 0) > 7).length;
+  const over15 = data.filter((r) => Number(r.days_suspend || 0) > 15).length;
+
+  return {
+    total,
+    contacted,
+    notContacted: total - contacted,
+    recovered,
+    closed,
+    failed,
+    pending: total - recovered - failed,
+    over7,
+    over15,
+    contactRate: pct(contacted, total),
+    recoveryRate: pct(recovered, total),
+  };
+}
+
+function suspendReasonCount(data: Row[]) {
+  const r: any = {
+    KHYC: 0,
+    "Nợ cước": 0,
+    "KHYC+NC": 0,
+  };
+
+  data.forEach((x) => {
+    const reason = String(x.suspend_reason || "").trim();
+
+    if (reason === "KHYC") r.KHYC++;
+    else if (reason === "Nợ cước") r["Nợ cước"]++;
+    else if (reason === "KHYC+NC") r["KHYC+NC"]++;
+  });
+
+  return r;
+}
+
+function topCount(data: Row[], field: keyof Row, limit = 10) {
+  const map = new Map<string, number>();
+
+  data.forEach((r) => {
+    const name = String(r[field] || "").trim();
+    if (!name) return;
+    map.set(name, (map.get(name) || 0) + 1);
+  });
+
+  return Array.from(map.entries())
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, limit);
+}
+
+function groupBy(data: Row[], field: "vtkv" | "cnkd") {
+  const map = new Map<string, Row[]>();
+
+  data.forEach((r) => {
+    const key = String(r[field] || "Không xác định").trim();
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)?.push(r);
+  });
+
+  return Array.from(map.entries())
+    .map(([name, arr]) => ({
+      name,
+      ...buildStats(arr),
+    }))
+    .sort((a, b) => b.total - a.total);
+}
+
+function parseLocalDate(v?: string) {
+  if (!v) return null;
+
+  const s = String(v).slice(0, 10);
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const [y, m, d] = s.split("-").map(Number);
+    return new Date(y, m - 1, d);
+  }
+
+  if (/^\d{2}-\d{2}-\d{4}$/.test(s)) {
+    const [d, m, y] = s.split("-").map(Number);
+    return new Date(y, m - 1, d);
+  }
+
+  if (/^\d{2}-\d{2}-\d{2}$/.test(s)) {
+    const [d, m, yy] = s.split("-").map(Number);
+    return new Date(2000 + yy, m - 1, d);
+  }
+
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return null;
+
+  return d;
+}
+
+function Nav({ label, active, onClick }: any) {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full text-left px-4 py-3 rounded-xl mb-2 font-semibold ${
+        active ? "bg-blue-50 text-blue-600" : "hover:bg-slate-50"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+function Summary({ label, value }: any) {
+  return (
+    <div className="flex justify-between py-3 border-b">
+      <span className="text-slate-600">{label}</span>
+      <b>{numOrText(value)}</b>
+    </div>
+  );
+}
+
+function getCurrentMonth() {
+  return new Date().toISOString().slice(0, 7);
+}
+
+function getToday() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function getYesterday() {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function dateOnly(v?: string) {
+  return String(v || "").slice(0, 10);
+}
+
+function formatDateVi(v: string) {
+  const [y, m, d] = v.split("-");
+  return `${d}/${m}/${y}`;
+}
+
+function pct(a: number, b: number) {
+  return b ? Math.round((a / b) * 1000) / 10 : 0;
+}
+
+function up(v?: string) {
   return String(v || "").trim().toUpperCase();
+}
+
+function num(v: any) {
+  return Number(v || 0).toLocaleString("vi-VN");
+}
+
+function numOrText(v: any) {
+  if (typeof v === "string" && v.includes("%")) return v;
+  return num(v);
+}
+
+function Th({ children }: any) {
+  return (
+    <th className="text-left p-3 font-bold text-slate-600 whitespace-nowrap">
+      {children}
+    </th>
+  );
+}
+
+function Td({ children, bold }: any) {
+  return (
+    <td className={`p-3 whitespace-nowrap ${bold ? "font-bold" : ""}`}>
+      {children}
+    </td>
+  );
 }
