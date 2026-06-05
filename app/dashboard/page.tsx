@@ -1066,19 +1066,104 @@ function VerticalBarChart({ data, color, dataKey, name }: any) {
     );
   }
 
+  const chartHeight = Math.max(360, data.length * 34 + 70);
+  const labelWidth = name === "Nguyên nhân cấp 2" ? 340 : 190;
+  const leftMargin = name === "Nguyên nhân cấp 2" ? 24 : 20;
+  const barSize = name === "Nguyên nhân cấp 2" ? 14 : 18;
+
   return (
-    <div className="h-[360px]">
+    <div style={{ height: chartHeight }}>
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} layout="vertical" margin={{ left: 40, right: 20 }}>
+        <BarChart
+          data={data}
+          layout="vertical"
+          margin={{ left: leftMargin, right: 30, top: 10, bottom: 10 }}
+          barCategoryGap={10}
+        >
           <CartesianGrid strokeDasharray="3 3" />
-          <XAxis type="number" allowDecimals={false} />
-          <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 12 }} />
-          <Tooltip />
-          <Bar dataKey={dataKey} name={name} fill={color} radius={[0, 8, 8, 0]} />
+          <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} />
+          <YAxis
+            type="category"
+            dataKey="name"
+            width={labelWidth}
+            interval={0}
+            tickLine={false}
+            tick={<WrappedYAxisTick maxCharsPerLine={name === "Nguyên nhân cấp 2" ? 24 : 18} />}
+          />
+          <Tooltip
+            formatter={(value: any) => [num(value), name]}
+            labelFormatter={(label: any) => String(label)}
+          />
+          <Bar
+            dataKey={dataKey}
+            name={name}
+            fill={color}
+            barSize={barSize}
+            radius={[0, 8, 8, 0]}
+          />
         </BarChart>
       </ResponsiveContainer>
     </div>
   );
+}
+
+function WrappedYAxisTick({
+  x,
+  y,
+  payload,
+  maxCharsPerLine = 22,
+}: any) {
+  const text = String(payload?.value || "");
+  const lines = wrapText(text, maxCharsPerLine).slice(0, 4);
+  const lineHeight = 11;
+  const startY = y - ((lines.length - 1) * lineHeight) / 2;
+
+  return (
+    <g transform={`translate(${x},${startY})`}>
+      {lines.map((line, index) => (
+        <text
+          key={`${line}-${index}`}
+          x={0}
+          y={index * lineHeight}
+          textAnchor="end"
+          dominantBaseline="middle"
+          fontSize={10.5}
+          fill="#475569"
+        >
+          {line}
+        </text>
+      ))}
+    </g>
+  );
+}
+
+function wrapText(text: string, maxChars: number) {
+  if (!text) return [""];
+
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let current = "";
+
+  words.forEach((word) => {
+    const next = current ? `${current} ${word}` : word;
+
+    if (next.length <= maxChars) {
+      current = next;
+    } else {
+      if (current) lines.push(current);
+
+      if (word.length > maxChars) {
+        lines.push(word.slice(0, maxChars));
+        current = word.slice(maxChars);
+      } else {
+        current = word;
+      }
+    }
+  });
+
+  if (current) lines.push(current);
+
+  return lines;
 }
 
 function MainCard({
