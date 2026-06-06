@@ -57,6 +57,11 @@ export default function DashboardPage() {
   const [selectedVTKV, setSelectedVTKV] = useState("ALL");
   const [selectedReportDate, setSelectedReportDate] = useState(getToday());
   const [tn1SamePeriodTotal, setTn1SamePeriodTotal] = useState(0);
+  const [tn1SamePeriodReasons, setTn1SamePeriodReasons] = useState<any>({
+    KHYC: 0,
+    "Nợ cước": 0,
+    "KHYC+NC": 0,
+  });
   const [loading, setLoading] = useState(true);
   const [cnkdPage, setCnkdPage] = useState(1);
   const [exporting, setExporting] = useState(false);
@@ -127,11 +132,28 @@ export default function DashboardPage() {
 
       if (data.status === "OK") {
         setTn1SamePeriodTotal(Number(data.total || 0));
+        setTn1SamePeriodReasons(
+          data.reasons || {
+            KHYC: 0,
+            "Nợ cước": 0,
+            "KHYC+NC": 0,
+          }
+        );
       } else {
         setTn1SamePeriodTotal(0);
+        setTn1SamePeriodReasons({
+          KHYC: 0,
+          "Nợ cước": 0,
+          "KHYC+NC": 0,
+        });
       }
     } catch (err) {
       setTn1SamePeriodTotal(0);
+      setTn1SamePeriodReasons({
+        KHYC: 0,
+        "Nợ cước": 0,
+        "KHYC+NC": 0,
+      });
     }
   }
 
@@ -206,6 +228,14 @@ export default function DashboardPage() {
   const reasonMonth = useMemo(() => suspendReasonCount(monthToDateRows), [monthToDateRows]);
   const reasonToday = useMemo(() => suspendReasonCount(todayRows), [todayRows]);
   const reasonYesterday = useMemo(() => suspendReasonCount(yesterdayRows), [yesterdayRows]);
+
+  const samePeriodReasonDelta = {
+    KHYC: (reasonMonth.KHYC || 0) - Number(tn1SamePeriodReasons.KHYC || 0),
+    "Nợ cước":
+      (reasonMonth["Nợ cước"] || 0) - Number(tn1SamePeriodReasons["Nợ cước"] || 0),
+    "KHYC+NC":
+      (reasonMonth["KHYC+NC"] || 0) - Number(tn1SamePeriodReasons["KHYC+NC"] || 0),
+  };
 
   const trendData = useMemo(() => {
     const [year, month] = activeMonth.split("-").map(Number);
@@ -547,6 +577,9 @@ export default function DashboardPage() {
                     extra={[
                       ["Nguồn", selectedVTKV === "ALL" ? "Tổng CN" : `VTKV ${selectedVTKV}`],
                       ["Ngày so sánh", formatDateVi(samePeriodDate)],
+                      ["KHYC", tn1SamePeriodReasons.KHYC || 0],
+                      ["Nợ cước", tn1SamePeriodReasons["Nợ cước"] || 0],
+                      ["KHYC+NC", tn1SamePeriodReasons["KHYC+NC"] || 0],
                     ]}
                   />
 
@@ -558,6 +591,9 @@ export default function DashboardPage() {
                     extra={[
                       ["Tháng hiện tại", monthStats.total],
                       ["Cùng kỳ Tn-1", tn1SamePeriodTotal],
+                      ["KHYC", formatSignedNumber(samePeriodReasonDelta.KHYC)],
+                      ["Nợ cước", formatSignedNumber(samePeriodReasonDelta["Nợ cước"])],
+                      ["KHYC+NC", formatSignedNumber(samePeriodReasonDelta["KHYC+NC"])],
                     ]}
                   />
 
@@ -696,6 +732,12 @@ export default function DashboardPage() {
                       label="So cùng kỳ Tn-1"
                       value={`${samePeriodDelta >= 0 ? "+" : ""}${num(samePeriodDelta)} TB | ${samePeriodPct >= 0 ? "+" : ""}${samePeriodPct}%`}
                     />
+                    <Summary label="Tn-1 KHYC" value={tn1SamePeriodReasons.KHYC || 0} />
+                    <Summary label="Tn-1 Nợ cước" value={tn1SamePeriodReasons["Nợ cước"] || 0} />
+                    <Summary label="Tn-1 KHYC+NC" value={tn1SamePeriodReasons["KHYC+NC"] || 0} />
+                    <Summary label="So KHYC" value={formatSignedNumber(samePeriodReasonDelta.KHYC)} />
+                    <Summary label="So Nợ cước" value={formatSignedNumber(samePeriodReasonDelta["Nợ cước"])} />
+                    <Summary label="So KHYC+NC" value={formatSignedNumber(samePeriodReasonDelta["KHYC+NC"])} />
                     <Summary label="Đã tiếp xúc" value={monthStats.contacted} />
                     <Summary label="Đã khôi phục" value={monthStats.recovered} />
                     <Summary label="Tỷ lệ khôi phục" value={`${monthStats.recoveryRate}%`} />
@@ -1477,6 +1519,11 @@ function up(v?: string) {
 
 function num(v: any) {
   return Number(v || 0).toLocaleString("vi-VN");
+}
+
+function formatSignedNumber(v: any) {
+  const n = Number(v || 0);
+  return `${n >= 0 ? "+" : ""}${num(n)}`;
 }
 
 function numOrText(v: any) {
