@@ -575,9 +575,7 @@ export default function DashboardPage() {
                     subtitle={`Lũy kế đến ${formatDateVi(samePeriodDate)}`}
                     color={COLORS.teal}
                     extra={[
-                      ["Nguồn", selectedVTKV === "ALL" ? "Tổng CN" : `VTKV ${selectedVTKV}`],
-                      ["Ngày so sánh", formatDateVi(samePeriodDate)],
-                      ["KHYC", tn1SamePeriodReasons.KHYC || 0],
+                       ["KHYC", tn1SamePeriodReasons.KHYC || 0],
                       ["Nợ cước", tn1SamePeriodReasons["Nợ cước"] || 0],
                       ["KHYC+NC", tn1SamePeriodReasons["KHYC+NC"] || 0],
                     ]}
